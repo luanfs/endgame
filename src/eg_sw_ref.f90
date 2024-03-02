@@ -1,4 +1,4 @@
-!------------------------------------------------
+
 ! John Thuburn 18/01/08
 ! Code to solve spherical
 ! shallow water equations using a fully
@@ -8,8 +8,55 @@
 !
 ! Modified by P.Peixoto in Sept 2015 for output and input
 ! Modified by P.Peixoto in Oct 2015 for Hollingsworth analysis
+! Modified by L.Santos  in Mar 2024 for FV3 outputs
 !------------------------------------------------
 
+
+
+MODULE FV3
+  !-------------------------------------------------
+  ! cubed sphere vars
+  !-------------------------------------------------
+  ! point structure
+  !-------------------------------------------------
+  type point_structure
+     ! Cartesian coordinates (R^3)
+     real*8, dimension(1:3) :: p
+
+     ! latlon 
+     real*8 :: lat, lon
+  end type point_structure
+
+  !-------------------------------------------------
+  ! grid structure
+  !-------------------------------------------------
+  type fv_grid_type
+     type(point_structure), allocatable, dimension(:,:,:) :: agrid
+     type(point_structure), allocatable, dimension(:,:,:) :: bgrid
+     type(point_structure), allocatable, dimension(:,:,:) :: cgrid
+     type(point_structure), allocatable, dimension(:,:,:) :: dgrid
+   
+     real*8, allocatable :: sina_c(:,:), sina_d(:,:)
+     real*8, allocatable :: cosa_c(:,:), cosa_d(:,:)
+     real*8, allocatable, dimension(:,:,:,:,:) :: c_contra2l, d_contra2l
+     real*8, allocatable, dimension(:,:,:,:,:) :: c_l2contra, d_l2contra
+
+     real*8 :: dx
+     integer :: grid_type  ! 0-equiedge grid; 2-equiangular
+     integer :: npx
+  end type fv_grid_type
+
+! panel indexes distribution
+!      +---+
+!      | 3 |
+!  +---+---+---+---+
+!  | 5 | 1 | 2 | 4 |
+!  +---+---+---+---+
+!      | 6 |
+!      +---+
+!---------------------------------------------------------------------
+
+END MODULE FV3
 MODULE version
 
   ! Choice of numerical schemes
@@ -41,7 +88,7 @@ MODULE version
   ! ic = 7   Galewsky et al. barotropically unstable jet - specify stream fn
   ! ic = 8   Like case 2 but with orography balancing u
 !!!!! Will be overwritten by input argument !!!!
-  INTEGER :: ic = 5
+  INTEGER :: ic = 7
 
   ! Dump reference solutions
   LOGICAL :: idumpref = .FALSE.
@@ -63,8 +110,8 @@ MODULE grid
   ! Set ng = p - 2 with the following
   !INTEGER, PARAMETER :: p = 9, nx = 2**p, ny = 2**(p-1) !512x256
   !INTEGER, PARAMETER :: p = 11, nx = 2**p, ny = 2**(p-1)
-  INTEGER, PARAMETER :: p = 8, nx = 2**p, ny = 2**(p-1) !256x128
-  !INTEGER, PARAMETER :: p = 6, nx = 2**p, ny = 2**(p-1)
+  !INTEGER, PARAMETER :: p = 8, nx = 2**p, ny = 2**(p-1) !256x128
+  INTEGER, PARAMETER :: p = 7, nx = 2**p, ny = 2**(p-1)
   ! Or set ng = p - 1 with the following
   ! INTEGER, PARAMETER :: p = 3, nx = 3*2**p, ny = 3*2**(p-1)
   ! INTEGER, PARAMETER :: p = 3, nx = 5*2**p, ny = 5*2**(p-1)
@@ -357,7 +404,7 @@ PROGRAM sw
 
 
   ! Output grid for use in tabulating reference solutions
-  ! CALL dumpgrid
+  !CALL dumpgrid
   ! STOP
 
   ! Set up physical constants
@@ -970,7 +1017,7 @@ SUBROUTINE timing
   ! Length of run
   !tstop = 1296000.0d0 !15 days
   IF(ic==7)THEN
-     tstop = 6.0d0*day2sec !518400.0d0 !6 days
+     tstop = 8.0d0*day2sec !518400.0d0 !6 days
   ELSEIF(ic==8)THEN
      tstop = 200.0d0*day2sec
   ELSE
@@ -1007,11 +1054,11 @@ SUBROUTINE timing
   ! Number of steps between output dumps
   !Day by day
   IF(ic==7 .AND. idumpref)THEN
-     idump = nstop/6
+     idump = nstop/8
   ELSEIF(ic == 8)THEN
      idump = nstop/20
   ELSE
-     idump = nstop/2
+     idump = nstop/15
   END IF
   !idump = 10
 
@@ -5404,161 +5451,222 @@ SUBROUTINE writeref
   USE timeinfo
   USE state
   USE version
-
+  USE FV3, only: fv_grid_type
   IMPLICIT NONE
 
-  INTEGER, PARAMETER :: &
-       ngref = 19,            &  ! Number of grids on which to dump reference solution
-       nreftime = 10              ! Number of times at which reference solution is required
+  INTEGER, PARAMETER :: ngref = 19  ! Number of grids on which to dump reference solution
 
   INTEGER :: ilist, igref, nface, if0
+  INTEGER :: nreftime      ! Number of times at which reference solution is required
   CHARACTER*128 :: ytime, dir
   CHARACTER*128 :: dirgrids, icname
-  CHARACTER*256 :: ygc(ngref)
-  CHARACTER*256 :: yrefpre(ngref)
+  CHARACTER*256 :: npx, face
   CHARACTER*256 :: filename
-  REAL*8 :: reftime(nreftime)
-  REAL*8, ALLOCATABLE :: flong(:), flat(:), href(:), uref(:), vref(:)
-  INTEGER:: inode, nnbnode, nedge, i, iedge
-  REAL*8:: p1, p2, p3
+  CHARACTER*256 :: dumpdir = 'dump/'
+  REAL*8, ALLOCATABLE :: reftime(:)
+  REAL*8, ALLOCATABLE :: href(:,:,:)
+  REAL*8, ALLOCATABLE :: uref(:,:,:), vref(:,:,:)
+  REAL*8, ALLOCATABLE :: uref_c(:,:,:), vref_c(:,:,:)
+  REAL*8, ALLOCATABLE :: uref_d(:,:,:), vref_d(:,:,:)
   LOGICAL:: ifile
+  INTEGER :: n, ngrids, iunit
+  INTEGER :: i, j, k, g
+  INTEGER :: nbfaces = 6
 
+  TYPE(fv_grid_type) :: gridstruct
   ! ----------------------------------------------------------
 
-  !dirgrids="../grid/"
-  dirgrids="../../iModel/grid/"
 
-  ! List of grid coordinate files
-  ygc(1) = 'HR95JT_001'
-  ygc(2) = 'HR95JT_002'
-  ygc(3) = 'HR95JT_003'
-  ygc(4) = 'HR95JT_004'
-  ygc(5) = 'HR95JT_005'
-  ygc(6) = 'HR95JT_006'
-  ygc(7) = 'HR95JT_007'
-  ygc(8) = '' !'HR95JT_008'
-  ygc(9) = '' !'HR95JT_009'
-  ygc(10) = '' !'HR95HK_009'
-  ygc(11) = 'icos_pol_scvt_h1_1'
-  ygc(12) = 'icos_pol_scvt_h1_2'
-  ygc(13) = 'icos_pol_scvt_h1_3'
-  ygc(14) = 'icos_pol_scvt_h1_4'
-  ygc(15) = 'icos_pol_scvt_h1_5'
-  ygc(16) = 'icos_pol_scvt_h1_6'
-  ygc(17) = 'icos_pol_scvt_h1_7'
-  ygc(18) = '' !'icos_pol_scvt_h1_8'
-  ygc(19) = '' !'icos_pol_scvt_h1_9'
-
-  WRITE(icname,'(I4.2)') ic
+  WRITE(icname,'(I8)') ic
   icname=trim(adjustl(trim(icname)))
 
-  DO igref=1,ngref
-     ! List of reference solution file prefixes
-     yrefpre( igref) = 'dump/TC'//trim(icname)//'_'//trim(ygc(igref))
-  END DO
-
-
+  IF (IC==7) THEN
+     nreftime = 8
+  ELSE
+     nreftime = 15
+  ENDIF
+  allocate(reftime(1:nreftime))
   ! List of times at which reference solution is required
-  reftime(1) = 3600.0d0              ! 1 hour
-  reftime(2) = 86400.0d0             ! 1 day
-  reftime(3) = 2.0d0*86400.0d0         ! 2 day
-  reftime(4) = 3.0d0*86400.0d0         ! 3 day
-  reftime(5) = 4.0d0*86400.0d0         ! 4 day
-  reftime(6) = 5.0d0*86400.0d0         ! 5 days
-  reftime(7) = 6.0d0*86400.0d0         ! 6 days
-  reftime(8) = 10.0D0*86400.0d0        ! 10 days
-  reftime(9) = 14.0D0*86400.0d0        ! 14 days
-  reftime(10) = 15.0d0*86400.0d0        ! 15 days
+  reftime(1) = 86400.0d0
+
+  DO i = 2, nreftime
+     reftime(i) = reftime(i-1) + 86400.d0
+  ENDDO
 
   IF(istep==1)THEN
-     OPEN(58,FILE='TC'//trim(icname)//'_reftimes.dat', STATUS='replace')
-     WRITE(58, *) nreftime
+     OPEN(58,FILE=trim(dumpdir)//'TC'//trim(icname)//'_reftimes.dat', STATUS='replace')
+     !WRITE(58, *) nreftime
      DO ilist = 1, nreftime
-        WRITE(58, *) reftime(ilist)
+        WRITE(58, *) int(reftime(ilist))
      END DO
      CLOSE(58)
   END IF
-stop
+
+  n = 48
+  ngrids = 5
+
   DO ilist = 1, nreftime
      IF (istep == NINT(reftime(ilist)/dt)) THEN
 
         ! Reference solution is required at this time
-        WRITE(ytime,'(I10.10)') NINT(reftime(ilist))
+        WRITE(ytime,'(i8)') INT(reftime(ilist))
+        DO g = 1, ngrids
+           gridstruct%grid_type = 2
+           call init_grid_cs(gridstruct, N)
 
-        DO igref = 1, ngref
 
-           ! Read in grid on which reference solution is required
-           filename=trim(dirgrids)//trim(ygc(igref))//'_vert_coord.dat'
-           PRINT *,'Reading: ',filename
-           INQUIRE(FILE=filename, EXIST=ifile)
-           IF(.NOT. ifile)THEN
-              PRINT*, "File not found"
-              CYCLE
-           END IF
-           OPEN(48,FILE=trim(dirgrids)//trim(ygc(igref))//'_vert_coord.dat',FORM='UNFORMATTED')
-           READ(48) nface
-           !print *,'  nface = ',nface
-           ALLOCATE(flong(nface),flat(nface),href(nface))
-           READ(48) (inode, p1, p2, p3, flong(if0), flat(if0), nnbnode, if0=1,nface)
-           CLOSE(48)
+           !------------------------------------------------------------------------------------------  
+           ! save grid
+           IF(ilist==1)THEN
+              WRITE(npx,'(i8)') N
+              DO k = 1, 6
+                 ! lon
+                 write(face,'(i8)') k
+                 filename = trim(dumpdir)//'g2_N'//trim(adjustl(npx))//"_face"//trim(adjustl(face))//'_lon.dat'
+                 CALL getunit(iunit)
+                 OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
+                 WRITE(iunit) gridstruct%bgrid(1:N+1,1:N+1,k)%lon
+                 CLOSE(iunit)
 
-           ! Interpolate reference solution to this grid
-           CALL interpref(flong,flat,href,nface)
+                 ! lat
+                 filename = trim(dumpdir)//'g2_N'//trim(adjustl(npx))//"_face"//trim(adjustl(face))//'_lat.dat'
+                 CALL getunit(iunit)
+                 OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
+                 WRITE(iunit) gridstruct%bgrid(1:N+1,1:N+1,k)%lat
+                 CLOSE(iunit)
+              ENDDO
+           ENDIF
+           !------------------------------------------------------------------------------------------  
 
-           ! Output reference solution
-           PRINT *,'Creating reference solution file for h: ',trim(yrefpre(igref))//'_'//trim(ytime)//'h.dat'
-           OPEN(49,FILE=trim(yrefpre(igref))//'_'//trim(ytime)//'h.dat',FORM='UNFORMATTED')
-           DO if0 = 1, nface
-              WRITE(49) href(if0)
-           ENDDO
-           CLOSE(49)
-           DEALLOCATE(flong,flat,href)
-
-           !Reference solution for velocities on edges
-
-           !Read grid data with midpoint hexagon edges
-           OPEN(48,FILE=trim(dirgrids)//trim(ygc(igref))//'_edhx_cc.dat',FORM='UNFORMATTED')
-           READ(48) nedge
-           !print *,'nedge = ',nedge
-
-           ALLOCATE(flong(nedge),flat(nedge), uref(nedge), vref(nedge))
-           READ(48) (iedge, p1, p2, p3, flong(i), flat(i), i=1, nedge)
-           CLOSE(48)
-
-           !Interpolate to grid edges
-           CALL interprefu(flong,flat,uref,nedge)
-           CALL interprefv(flong,flat,vref,nedge)
 
            ! Output reference solution
-           PRINT *,'Creating reference solution file for u, v on hx edges: ',trim(yrefpre(igref))//'_'//trim(ytime)//'uv_edhx.dat'
-           OPEN(49,FILE=trim(yrefpre(igref))//'_'//trim(ytime)//'uv_edhx.dat',FORM='UNFORMATTED')
-           DO i = 1, nedge
-              WRITE(49) uref(i), vref(i)
+           ALLOCATE(href(1:N,1:N,1:nbfaces))
+           ALLOCATE(uref(1:N,1:N,1:nbfaces))
+           ALLOCATE(vref(1:N,1:N,1:nbfaces))
+           DO k = 1, nbfaces
+             DO i = 1, N
+               CALL interpref (gridstruct%agrid(i,:,k)%lon, gridstruct%agrid(i,:,k)%lat, href(i,:,k), N)
+               CALL interprefu(gridstruct%agrid(i,:,k)%lon, gridstruct%agrid(i,:,k)%lat, uref(i,:,k), N)
+               CALL interprefv(gridstruct%agrid(i,:,k)%lon, gridstruct%agrid(i,:,k)%lat, vref(i,:,k), N)
+             ENDDO
            ENDDO
-           CLOSE(49)
 
-           !Read grid data with midpoint triangle edges
-           OPEN(48,FILE=trim(dirgrids)//trim(ygc(igref))//'_ed_cc.dat',FORM='UNFORMATTED')
-           READ(48) nedge
-           !print *,'nedge = ',nedge
-
-           READ(48) (iedge, p1, p2, p3, flong(i), flat(i), i=1, nedge)
-           CLOSE(48)
-
-           !Interpolate to grid edges
-           CALL interprefu(flong,flat,uref,nedge)
-           CALL interprefv(flong,flat,vref,nedge)
-
-           ! Output reference solution
-           PRINT *,'Creating reference solution file for u, v on tr edges: ',trim(yrefpre(igref))//'_'//trim(ytime)//'uv_ed.dat'
-           OPEN(49,FILE=trim(yrefpre(igref))//'_'//trim(ytime)//'uv_ed.dat',FORM='UNFORMATTED')
-           DO i = 1, nedge
-              WRITE(49) uref(i), vref(i)
+           ! field at cgrid point (uc,vd)
+           ALLOCATE(uref_c(1:N+1,1:N,1:nbfaces))
+           ALLOCATE(vref_d(1:N+1,1:N,1:nbfaces))
+           DO k = 1, nbfaces
+             DO i = 1, N+1
+               CALL interprefu(gridstruct%cgrid(i,:,k)%lon, gridstruct%cgrid(i,:,k)%lat, uref_c(i,:,k), N)
+               CALL interprefv(gridstruct%cgrid(i,:,k)%lon, gridstruct%cgrid(i,:,k)%lat, vref_d(i,:,k), N)
+             ENDDO
            ENDDO
-           CLOSE(49)
 
-           DEALLOCATE(flong,flat, uref, vref)
+           ! d grid fields
+           ALLOCATE(uref_d(1:N,1:N+1,1:nbfaces))
+           ALLOCATE(vref_c(1:N,1:N+1,1:nbfaces))
+           DO k = 1, nbfaces
+             DO j = 1, N+1
+               CALL interprefu(gridstruct%dgrid(:,j,k)%lon, gridstruct%dgrid(:,j,k)%lat, uref_d(:,j,k), N)
+               CALL interprefv(gridstruct%dgrid(:,j,k)%lon, gridstruct%dgrid(:,j,k)%lat, vref_c(:,j,k), N)
+             ENDDO
+           ENDDO
 
+
+           ! fluid depth
+           WRITE(npx,'(i8)') N
+           filename = trim(dumpdir)//'tc'//trim(icname)//'_g2_N'//trim(adjustl(npx))//'_h_t'//trim(adjustl(ytime))//'.dat'
+           PRINT *,'Creating reference solution file for h: ', filename
+           DO k = 1, 6
+              write(face,'(i8)') k
+              filename = trim(dumpdir)//'tc'//trim(icname)//'_g2_N'//trim(adjustl(npx))//'_h_t'//trim(adjustl(ytime))&
+              //"_face"//trim(adjustl(face))//'.dat'
+              print*, filename
+
+              CALL getunit(iunit)
+              OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
+              WRITE(iunit) href(:,:,k)
+              CLOSE(iunit)
+           ENDDO
+
+           ! zonal velocity u
+           WRITE(npx,'(i8)') N
+           filename = trim(dumpdir)//'tc'//trim(icname)//'_g2_N'//trim(adjustl(npx))//'_u_t'//trim(adjustl(ytime))//'.dat'
+           PRINT *,'Creating reference solution file for u: ', filename
+           DO k = 1, 6
+              write(face,'(i8)') k
+              filename = trim(dumpdir)//'tc'//trim(icname)//'_g2_N'//trim(adjustl(npx))//'_u_t'//trim(adjustl(ytime))&
+              //"_face"//trim(adjustl(face))//'.dat'
+              print*, filename
+
+              CALL getunit(iunit)
+              OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
+              WRITE(iunit) uref(:,:,k)
+              CLOSE(iunit)
+           ENDDO
+
+            ! meridional velocity v
+           WRITE(npx,'(i8)') N
+           filename = trim(dumpdir)//'tc'//trim(icname)//'_g2_N'//trim(adjustl(npx))//'_v_t'//trim(adjustl(ytime))//'.dat'
+           PRINT *,'Creating reference solution file for v: ', filename
+           DO k = 1, 6
+              write(face,'(i8)') k
+              filename = trim(dumpdir)//'tc'//trim(icname)//'_g2_N'//trim(adjustl(npx))//'_v_t'//trim(adjustl(ytime))&
+              //"_face"//trim(adjustl(face))//'.dat'
+              print*, filename
+
+              CALL getunit(iunit)
+              OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
+              WRITE(iunit) vref(:,:,k)
+              CLOSE(iunit)
+           ENDDO
+
+
+           !...
+           ! zonal velocity u
+           WRITE(npx,'(i8)') N
+           filename = trim(dumpdir)//'tc'//trim(icname)//'_g2_N'//trim(adjustl(npx))//'_ud_t'//trim(adjustl(ytime))//'.dat'
+           PRINT *,'Creating reference solution file for u: ', filename
+           DO k = 1, 6
+              write(face,'(i8)') k
+              filename = trim(dumpdir)//'tc'//trim(icname)//'_g2_N'//trim(adjustl(npx))//'_ud_t'//trim(adjustl(ytime))&
+              //"_face"//trim(adjustl(face))//'.dat'
+              print*, filename
+
+              CALL getunit(iunit)
+              OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
+              WRITE(iunit) uref_d(:,:,k)
+              CLOSE(iunit)
+           ENDDO
+
+            ! meridional velocity v
+           WRITE(npx,'(i8)') N
+           filename = trim(dumpdir)//'tc'//trim(icname)//'_g2_N'//trim(adjustl(npx))//'_vd_t'//trim(adjustl(ytime))//'.dat'
+           PRINT *,'Creating reference solution file for v: ', filename
+           DO k = 1, 6
+              write(face,'(i8)') k
+              filename = trim(dumpdir)//'tc'//trim(icname)//'_g2_N'//trim(adjustl(npx))//'_vd_t'//trim(adjustl(ytime))&
+              //"_face"//trim(adjustl(face))//'.dat'
+              print*, filename
+
+              CALL getunit(iunit)
+              OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
+              WRITE(iunit) vref_d(:,:,k)
+              CLOSE(iunit)
+           ENDDO
+
+!print*, maxval(abs( 0.5d0*(uref_d(1:N,2:N+1,:)+uref_d(1:N,1:N,:)) - uref(1:N,1:N,:)))
+!print*, maxval(abs( 0.5d0*(vref_d(2:N+1,1:N,:)+vref_d(1:N,1:N,:)) - vref(1:N,1:N,:)))
+!read(*,*)
+
+           CALL end_grid_cs(gridstruct)
+           N = N*2
+           DEALLOCATE(href)
+           DEALLOCATE(uref)
+           DEALLOCATE(vref)
+           DEALLOCATE(uref_c)
+           DEALLOCATE(vref_c)
+           DEALLOCATE(uref_d)
+           DEALLOCATE(vref_d)
         ENDDO
 
      ENDIF
@@ -6495,7 +6603,6 @@ SUBROUTINE dumpstate(jstep)
   END IF
   WRITE(ystep,*) (ny)
   yname = trim(yname)//"x"//trim(adjustl(trim(ystep)))
-
   ! Surface height
   h = (phi + phis)/gravity
   CALL plot_var(u, "u_t"//trim(yname), "u")
@@ -6532,7 +6639,6 @@ SUBROUTINE dumpstate(jstep)
 
 
   !  CLOSE(23)
-
 
 END SUBROUTINE dumpstate
 
@@ -6590,36 +6696,15 @@ SUBROUTINE plot_var(q, ytitle, pos)
      qplot(1:nx, ny)=q(1:nx, ny)
   END IF
 
-  !Buffer for binary plotting - faster
-  ALLOCATE(buffer(3, 1:nx*ny))
-
-  !Write to buffer
-  k=1
   !Pixel registration mode (GMT) (at midpoint of cell)
-  tlat=-90.0+dlat/2.0
-  DO j=1,ny
-     !tlat=lat(j)*rad2deg
-     tlon=-180.0+dlon/2.0
-     !print*, "Lat: ", tlat
-     DO i=1,nx
-        !tlon=lon(i)*rad2deg
-        ! Convert 0->360 to -180->180
-        !if(tlon>180.0d0)then
-        !	tlon=tlon-360.0d0
-        !endif
-
-        buffer(1, k)=tlon
-        buffer(2, k)=tlat
-        buffer(3, k)=qplot(mod(i+nx/2-1, nx)+1,j)
-        k=k+1
-        !write(iunit) tlon, tlat, varunif(i,j)
-        tlon=tlon+dlon
-     END DO
-     tlat=tlat+dlat
-  END DO
+  !DO j=1,ny
+  !   DO i=1,!nx
+  !      write(iunit) qplot(mod(i+nx/2-1, nx)+1,j)
+  !   END DO
+  !END DO
 
   !Filename for lat lon field
-  WRITE(icname,'(I4.2)') ic
+  WRITE(icname,'(I8)') ic
   icname=trim(adjustl(trim(icname)))
   WRITE(coriname,'(I4.1)') coriolis_mtd
   coriname=trim(adjustl(trim(coriname)))
@@ -6633,18 +6718,20 @@ SUBROUTINE plot_var(q, ytitle, pos)
   WRITE(hrefname,'(F8.3)') phiref/gravity
   hrefname=trim(adjustl(trim(hrefname)))
   !ENDIF
-  filename="dump/"//"eg_swe_run_ic"//trim(icname)//"_cor"//trim(coriname)//&
-    "_href"//trim(hrefname)//trim(slicename)//"_"//trim(adjustl(trim(ytitle)))//".dat"
+  filename="dump/"//"eg_swe_run_ic"//trim(icname)//"_cor"//trim(coriname)//"_"//trim(adjustl(trim(ytitle)))//".dat"
   !filename="dump/"//"eg_swe_cor"//trim(coriname)//"ic"//trim(icname)//"_"//trim(ytitle)//".dat"
 
   !Write values on file
   CALL getunit(iunit)
   OPEN(iunit,FILE=filename, STATUS='replace', ACCESS='stream', FORM='unformatted')
   !Write whole block to file (much faster)
-  WRITE(iunit) buffer
+  DO i = 1, nx
+     DO j = 1, ny
+        WRITE(iunit) qplot(i,j)
+     ENDDO
+  ENDDO
   CLOSE(iunit)
   PRINT*, "Long-lat output written in : ", trim(filename)
-
   RETURN
 END SUBROUTINE plot_var
 
@@ -6689,3 +6776,409 @@ SUBROUTINE getunit ( iunit )
   RETURN
 END SUBROUTINE getunit
 
+
+ subroutine equidistant_gnomonic_map(p, x, y, panel)
+ !---------------------------------------------------------------
+ ! this routine computes the gnomonic mapping based on the equidistant projection
+ ! defined by rancic et al (96) for each panel
+ ! - x, y are the variables defined in [-a, a].
+ ! - the projection is applied on the points (x,y)
+ ! - returns the cartesian coordinates of the
+ ! projected point p.
+ !
+ ! references: 
+ ! - rancic, m., purser, r.j. and mesinger, f. (1996), a global shallow-water model using an expanded
+ !  spherical cube: gnomonic versus conformal coordinates. q.j.r. meteorol. soc., 122: 959-982. 
+ !  https://doi.org/10.1002/qj.49712253209
+ ! - nair, r. d., thomas, s. j., & loft, r. d. (2005). a discontinuous galerkin transport scheme on the
+ ! cubed sphere, monthly weather review, 133(4), 814-828. retrieved feb 7, 2022, 
+ ! from https://journals.ametsoc.org/view/journals/mwre/133/4/mwr2890.1.xml
+ !
+ !---------------------------------------------------------------
+ real(kind=8), intent(in) :: x ! local coordinates
+ real(kind=8), intent(in) :: y ! local coordinates
+ real(kind=8), intent(out) :: p(1:3) ! projected point
+
+ ! panel
+ integer, intent(in) :: panel
+
+ ! compute the cartesian coordinates for each panel
+ ! with the aid of the auxiliary variables  
+ select case(panel)
+   case(1)
+     p(1) =  1.d0
+     p(2) =  x
+     p(3) =  y
+
+   case(2)
+     p(1) = -x
+     p(2) =  1.d0
+     p(3) =  y
+
+   case(3)
+     p(1) = -x
+     p(2) = -y
+     p(3) =  1.d0
+
+   case(4)
+     p(1) = -1.d0
+     p(2) = -y
+     p(3) = -x      
+
+   case(5)
+     p(1) =  y
+     p(2) = -1.d0
+     p(3) = -x
+   case(6)
+     p(1) =  y
+     p(2) =  x
+     p(3) = -1.d0
+
+   case default
+     print*, 'error on equidistant_gnomonic_map: invalid panel'
+     stop
+ end select
+ p = p/norm2(p)
+ return
+ end subroutine equidistant_gnomonic_map
+
+
+
+!-------------------------------------------------
+! generate csgrid
+!-------------------------------------------------
+subroutine init_grid_cs(gridstruct, N)
+   USE FV3
+   type(fv_grid_type), intent(INOUT) :: gridstruct
+   integer :: N
+   real*8 :: aref, Rref, dxcube, x, y
+   real*8, allocatable :: gridline_a(:)
+   real*8, allocatable :: gridline_b(:)
+
+   real*8, allocatable :: tan_angle_a(:)
+   real*8, allocatable :: tan_angle_b(:)
+
+   ! Real aux vars
+   real*8 :: elon(1:3), elat(1:3)
+   real*8 :: ex(1:3), ey(1:3) ! vectors
+   real*8 :: p0(1:3), px(1:3), py(1:3) ! vectors
+   real*8 :: lat, lon
+   real*8 :: a11, a12, a21, a22, det
+
+   integer :: is, ie
+   integer :: js, je
+   integer :: i, j, k
+   integer :: nbfaces=6
+
+   is  = 1
+   js  = 1
+   ie  = N
+   je  = N
+
+   gridstruct%npx = N
+
+   allocate(gridline_b(is:ie+1))
+   allocate(gridline_a(is:ie))
+
+   allocate(tan_angle_b(is:ie+1))
+   allocate(tan_angle_a(is:ie))
+
+   allocate(gridstruct%agrid(is:ie  , js:je  , 1:nbfaces))
+   allocate(gridstruct%bgrid(is:ie+1, js:je+1, 1:nbfaces))
+   allocate(gridstruct%cgrid(is:ie+1, js:je  , 1:nbfaces))
+   allocate(gridstruct%dgrid(is:ie  , js:je+1, 1:nbfaces))
+
+   allocate(gridstruct%sina_c(is:ie+1, js:je  ))
+   allocate(gridstruct%cosa_c(is:ie+1, js:je  ))
+   allocate(gridstruct%sina_d(is:ie  , js:je+1))
+   allocate(gridstruct%cosa_d(is:ie  , js:je+1))
+ 
+   allocate(gridstruct%c_contra2l(1:2,1:2,is:ie+1, js:je, 1:nbfaces  ))
+   allocate(gridstruct%c_l2contra(1:2,1:2,is:ie+1, js:je, 1:nbfaces  ))
+
+   allocate(gridstruct%d_contra2l(1:2,1:2,is:ie, js:je+1, 1:nbfaces))
+   allocate(gridstruct%d_l2contra(1:2,1:2,is:ie, js:je+1, 1:nbfaces))
+ 
+   if(gridstruct%grid_type==0) then !equiangular grid
+      aref = dasin(1.d0/dsqrt(3.d0))
+      Rref = dsqrt(2.d0)
+   else if (gridstruct%grid_type==2) then !equiedge grid
+      aref = datan(1.d0)
+      Rref = 1.d0
+   else
+      print*, 'ERROR in init_grid: invalid grid_type'
+      stop
+   endif
+
+   gridstruct%dx = 2.d0*aref/gridstruct%npx
+
+   ! compute b grid local coordinates
+   do i = is, ie+1
+      gridline_b(i) = -aref + (i-1.d0)*gridstruct%dx
+      tan_angle_b(i) = dtan(gridline_b(i))*Rref
+   enddo
+
+   do i = is, ie
+      gridline_a(i) = -aref + (i-0.5d0)*gridstruct%dx
+      tan_angle_a(i) = dtan(gridline_a(i))*Rref
+   enddo
+
+   !--------------------------------------------------------------------------------------------
+   ! compute bgrid
+   do k = 1, nbfaces
+      do i = is, ie+1
+         x = tan_angle_b(i)
+         do j = js, je+1
+            y = tan_angle_b(j)
+            call equidistant_gnomonic_map(gridstruct%bgrid(i,j,k)%p, x, y, k)
+            call cart2sph ( gridstruct%bgrid(i,j,k)%p(1), gridstruct%bgrid(i,j,k)%p(2), gridstruct%bgrid(i,j,k)%p(3),&
+            gridstruct%bgrid(i,j,k)%lon, gridstruct%bgrid(i,j,k)%lat)
+         enddo
+      enddo
+   enddo
+
+
+   !--------------------------------------------------------------------------------------------
+
+   !--------------------------------------------------------------------------------------------
+   ! compute agrid
+   do k = 1, nbfaces
+      do i = is, ie
+         do j = js, je
+            gridstruct%agrid(i,j,k)%p = (gridstruct%bgrid(i  ,j,k)%p + gridstruct%bgrid(i  ,j+1,k)%p &
+                                       + gridstruct%bgrid(i+1,j,k)%p + gridstruct%bgrid(i+1,j+1,k)%p)*0.25d0 
+            gridstruct%agrid(i,j,k)%p = gridstruct%agrid(i,j,k)%p/norm2(gridstruct%agrid(i,j,k)%p)
+            call cart2sph ( gridstruct%agrid(i,j,k)%p(1), gridstruct%agrid(i,j,k)%p(2), &
+           gridstruct% agrid(i,j,k)%p(3), gridstruct%agrid(i,j,k)%lon, gridstruct%agrid(i,j,k)%lat)
+         enddo
+      enddo
+   enddo
+
+
+   !--------------------------------------------------------------------------------------------
+   ! compute cgrid
+   do k = 1, nbfaces
+      do i = is, ie+1
+         do j = js, je
+            gridstruct%cgrid(i,j,k)%p = (gridstruct%bgrid(i,j+1,k)%p + gridstruct%bgrid(i,j,k)%p)*0.5d0 
+            gridstruct%cgrid(i,j,k)%p = gridstruct%cgrid(i,j,k)%p/norm2(gridstruct%cgrid(i,j,k)%p)
+            call cart2sph ( gridstruct%cgrid(i,j,k)%p(1), gridstruct%cgrid(i,j,k)%p(2), gridstruct%cgrid(i,j,k)%p(3), &
+            gridstruct%cgrid(i,j,k)%lon, gridstruct%cgrid(i,j,k)%lat)
+         enddo
+      enddo
+   enddo
+   !--------------------------------------------------------------------------------------------
+
+   !--------------------------------------------------------------------------------------------
+   ! compute dgrid
+   do k = 1, nbfaces
+      do i = is, ie
+         do j = js, je+1
+            gridstruct%dgrid(i,j,k)%p = (gridstruct%bgrid(i+1,j,k)%p + gridstruct%bgrid(i,j,k)%p)*0.5d0 
+            gridstruct%dgrid(i,j,k)%p = gridstruct%dgrid(i,j,k)%p/norm2(gridstruct%dgrid(i,j,k)%p)
+            call cart2sph ( gridstruct%dgrid(i,j,k)%p(1), gridstruct%dgrid(i,j,k)%p(2), gridstruct%dgrid(i,j,k)%p(3),&
+            gridstruct%dgrid(i,j,k)%lon, gridstruct%dgrid(i,j,k)%lat)
+         enddo
+      enddo
+   enddo
+   !--------------------------------------------------------------------------------------------
+
+
+   !--------------------------------------------------------------------------------------------
+
+
+   ! conversion matrices
+   do k = 1, nbfaces
+      ! C grid
+      do i = is, ie+1
+         do j = js, je
+            ! get latlon tangent vector
+            call unit_vect_latlon_ext([gridstruct%cgrid(i,j,k)%lon, gridstruct%cgrid(i,j,k)%lat], elon, elat)
+
+            p0 = gridstruct%cgrid(i,j,k)%p
+            px = gridstruct%agrid(i,j,k)%p
+            py = gridstruct%bgrid(i,j+1,k)%p
+
+            ! unit vector - x direction
+            ex = px-p0
+            call proj_vec_sphere(ex, p0, ex)
+
+            ex = ex/norm2(ex)
+            ! unit vector - y direction
+            ey = py-p0
+            call proj_vec_sphere(ey, p0, ey)
+            ey = ey/norm2(ey)
+
+            if(p==1) then
+               gridstruct%cosa_c(i,j) = dot_product(ex, ey)
+               gridstruct%sina_c(i,j) = dsqrt(1.d0 - gridstruct%cosa_c(i,j)**2)
+            endif
+
+            a11 = dot_product(ex, elon)
+            a12 = dot_product(ey, elon)
+            a21 = dot_product(ex, elat)
+            a22 = dot_product(ey, elat)
+            det = a11*a22 - a21*a12
+
+            ! Contra to latlon matrix
+            gridstruct%c_contra2l(1,1,i,j,k) = a11
+            gridstruct%c_contra2l(1,2,i,j,k) = a12
+            gridstruct%c_contra2l(2,1,i,j,k) = a21
+            gridstruct%c_contra2l(2,2,i,j,k) = a22
+
+            ! latlon to contra matrix
+            gridstruct%c_l2contra(1,1,i,j,k) =  a22/det
+            gridstruct%c_l2contra(1,2,i,j,k) = -a12/det
+            gridstruct%c_l2contra(2,1,i,j,k) = -a21/det
+            gridstruct%c_l2contra(2,2,i,j,k) =  a11/det
+         enddo
+      enddo
+
+      ! D grid
+      do i = is, ie
+         do j = js, je+1
+            ! get latlon tangent vector
+            call unit_vect_latlon_ext([gridstruct%dgrid(i,j,k)%lon, gridstruct%dgrid(i,j,k)%lat], elon, elat)
+            p0 = gridstruct%dgrid(i,j,k)%p
+            py = gridstruct%agrid(i,j,k)%p
+            px = gridstruct%bgrid(i+1,j,k)%p
+
+            ! unit vector - x direction
+            ex = px-p0
+            call proj_vec_sphere(ex, p0, ex)
+            ex = ex/norm2(ex)
+
+            ! unit vector - y direction
+            ey = py-p0
+            call proj_vec_sphere(ey, p0, ey)
+            ey = ey/norm2(ey)
+
+            if(p==1) then
+               gridstruct%cosa_d(i,j) = dot_product(ex, ey)
+               gridstruct%sina_d(i,j) = dsqrt(1.d0 - gridstruct%cosa_d(i,j)**2)
+            endif
+
+            a11 = dot_product(ex, elon)
+            a12 = dot_product(ey, elon)
+            a21 = dot_product(ex, elat)
+            a22 = dot_product(ey, elat)
+            det = a11*a22 - a21*a12
+
+            ! Contra to latlon matrix
+            gridstruct%d_contra2l(1,1,i,j,k) = a11
+            gridstruct%d_contra2l(1,2,i,j,k) = a12
+            gridstruct%d_contra2l(2,1,i,j,k) = a21
+            gridstruct%d_contra2l(2,2,i,j,k) = a22
+
+            ! latlon to contra matrix
+            gridstruct%d_l2contra(1,1,i,j,k)=  a22/det
+            gridstruct%d_l2contra(1,2,i,j,k)= -a12/det
+            gridstruct%d_l2contra(2,1,i,j,k)= -a21/det
+            gridstruct%d_l2contra(2,2,i,j,k)=  a11/det
+         enddo
+      enddo
+   enddo
+   deallocate(gridline_a)
+   deallocate(gridline_b)
+   deallocate(tan_angle_a)
+   deallocate(tan_angle_b)
+end subroutine init_grid_cs
+
+subroutine end_grid_cs(gridstruct)
+   USE FV3
+   type(fv_grid_type), intent(INOUT) :: gridstruct
+
+   deallocate(gridstruct%agrid)
+   deallocate(gridstruct%bgrid)
+   deallocate(gridstruct%cgrid)
+   deallocate(gridstruct%dgrid)
+
+   deallocate(gridstruct%sina_c)
+   deallocate(gridstruct%cosa_c)
+   deallocate(gridstruct%sina_d)
+   deallocate(gridstruct%cosa_d)
+ 
+   deallocate(gridstruct%c_contra2l)
+   deallocate(gridstruct%c_l2contra)
+
+   deallocate(gridstruct%d_contra2l)
+   deallocate(gridstruct%d_l2contra)
+
+end subroutine end_grid_cs
+subroutine cart2sph ( x, y, z, lon, lat )
+  !---------------------------------------------------------------------
+  ! cart2sph 
+  !     transforms  cartesian coordinates to geographical (lat,lon) coordinates .
+  !     similar to stripack's scoord
+  !
+  !    input:  x, y, z, the coordinates in the range -1 to 1. 
+  !
+  !    output, lon, longitude of the node in radians [-pi,pi].
+  !                       lon=0 if point lies on the z-axis.  
+  !    output, lat, latitude of the node in radians [-pi/2,pi/2].
+  !                       lat=0 if   x**2 + y**2 + z**2 = 0.
+  !------------------------------------------------------------------------------------
+  real*8, intent(in) :: x
+  real*8, intent(in) :: y
+  real*8, intent(in) :: z
+  real*8, intent(out) :: lat
+  real*8, intent(out) :: lon
+  real*8:: pnrm
+
+  pnrm = dsqrt ( x **2 + y**2 + z**2 )
+  if ( x /= 0.0d+00 .or. y /= 0.0d+00 ) then
+     lon = datan2 ( y, x )
+  else
+     lon = 0.0d+00
+  end if
+
+  if ( pnrm /= 0.0d+00 ) then
+     lat = dasin ( z / pnrm )
+  else
+     print*, "cart2sph warning: point not in the unit sphere. norm= ", pnrm
+     lat = 0.0d+00
+  end if
+
+  return
+end subroutine cart2sph
+
+
+  subroutine proj_vec_sphere(v, p, proj)
+    !-----------------------------------------------------------
+    !  Projects a vector 'v' on the plane tangent to a sphere
+    !   Uses the the tangent plane relative to the unit sphere's
+    !   point 'p', in cartesian coords
+    !-----------------------------------------------------------
+    real*8, intent(in), dimension(1:3) :: v
+    real*8, intent(in), dimension(1:3) :: p
+    real*8, intent(inout) :: proj(1:3)
+
+    proj(1:3)=&
+         v(1:3)-dot_product(v,p)*p(1:3)/norm2(p)
+
+    return
+  end subroutine proj_vec_sphere
+
+  subroutine unit_vect_latlon_ext(pp, elon, elat)
+    real*8, intent(IN)  :: pp(2)
+    real*8, intent(OUT) :: elon(3), elat(3)
+    real*8:: lon, lat
+    real*8:: sin_lon, cos_lon, sin_lat, cos_lat
+
+    lon = pp(1)
+    lat = pp(2)
+
+    sin_lon = dsin(lon)
+    cos_lon = dcos(lon)
+    sin_lat = dsin(lat)
+    cos_lat = dcos(lat)
+
+    elon(1) = -sin_lon
+    elon(2) = cos_lon
+    elon(3) = 0.d0
+
+    elat(1) = -sin_lat*cos_lon
+    elat(2) = -sin_lat*sin_lon
+    elat(3) = cos_lat
+
+  end subroutine unit_vect_latlon_ext
