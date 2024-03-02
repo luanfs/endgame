@@ -29,6 +29,14 @@ else
     echo "Binary files will be put inside        bin/"
 fi
 
+if [ -d graphs ] ; then
+    echo "Output graphs files will be put inside        graphs/"
+else
+    mkdir graphs
+    echo "Directory 'graphs' created" 
+    echo "Output data files will be put inside        graphs/"
+fi
+
 
 #echo "End of directory structuring."
 echo

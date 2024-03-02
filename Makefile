@@ -15,8 +15,8 @@ all: config endgame
 run: endgame
 	./endgame
 
-endgame: src/eg_sw_ref_psp.f90 
-	$(F90) $(FFLAG) src/eg_sw_ref_psp.f90 -o endgame -Ibin
+endgame: src/eg_sw_ref.f90 
+	$(F90) $(FFLAG) src/eg_sw_ref.f90 -o endgame -Ibin
 	mv *.mod bin/
 	
 #Configure Enviroment (directories)
