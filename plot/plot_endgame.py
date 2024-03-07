@@ -14,8 +14,8 @@ figformat='png'
 # some constants
 N = 128
 M = N//2
-tc = 5 # test case
-gtype=2
+tc = 7 # test case
+sec2day=86400
 
 
 map_projection='mercator'
@@ -35,7 +35,7 @@ vort = np.zeros((N,M,len(timedata)))
 pv   = np.zeros((N,M,len(timedata)))
 
 lat = np.linspace(-90,90,M)
-lon = np.linspace(-180,180,N)
+lon = np.linspace(0,360,N)
 lat, lon = np.meshgrid(lat,lon)
 
 fields = [h,u,v,vort,pv]
@@ -69,6 +69,7 @@ for t in range(0,len(timedata)):
           plateCr = ccrs.Orthographic(central_longitude=0.0, central_latitude=0.0)
           plateCr = ccrs.Orthographic(central_longitude=0.25*180, central_latitude=180/6.0)
 
+
       projection=ccrs.PlateCarree(central_longitude=0)
       plateCr._threshold = plateCr._threshold/10. 
       ax = plt.axes(projection=plateCr)
@@ -77,7 +78,8 @@ for t in range(0,len(timedata)):
       ax.gridlines(draw_labels=True)
 
       im=plt.contourf(lon, lat, field[:,:,t], cmap='jet',  transform=ccrs.PlateCarree(), levels=np.linspace(fmin,fmax,100))
-      #plt.title(title)
+      title ="TC"+str(tc)+" - "+name+" - time (days) = "+str(timedata[t]/sec2day)+" - "+str(N)+"x"+str(M) 
+      plt.title(title)
 
       # Plot colorbar
       cax,kw = colorbar.make_axes(ax,orientation='vertical' , fraction=0.046, pad=0.04, shrink=0.8, format='%.1e')

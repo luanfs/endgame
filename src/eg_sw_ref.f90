@@ -33,14 +33,6 @@ MODULE FV3
   type fv_grid_type
      type(point_structure), allocatable, dimension(:,:,:) :: agrid
      type(point_structure), allocatable, dimension(:,:,:) :: bgrid
-     type(point_structure), allocatable, dimension(:,:,:) :: cgrid
-     type(point_structure), allocatable, dimension(:,:,:) :: dgrid
-   
-     real*8, allocatable :: sina_c(:,:), sina_d(:,:)
-     real*8, allocatable :: cosa_c(:,:), cosa_d(:,:)
-     real*8, allocatable, dimension(:,:,:,:,:) :: c_contra2l, d_contra2l
-     real*8, allocatable, dimension(:,:,:,:,:) :: c_l2contra, d_l2contra
-
      real*8 :: dx
      integer :: grid_type  ! 0-equiedge grid; 2-equiangular
      integer :: npx
@@ -5461,21 +5453,24 @@ SUBROUTINE writeref
   CHARACTER*128 :: ytime, dir
   CHARACTER*128 :: dirgrids, icname
   CHARACTER*256 :: npx, face
-  CHARACTER*256 :: filename
+  CHARACTER*256 :: filename, gn
   CHARACTER*256 :: dumpdir = 'dump/'
   REAL*8, ALLOCATABLE :: reftime(:)
   REAL*8, ALLOCATABLE :: href(:,:,:)
   REAL*8, ALLOCATABLE :: uref(:,:,:), vref(:,:,:)
-  REAL*8, ALLOCATABLE :: uref_c(:,:,:), vref_c(:,:,:)
-  REAL*8, ALLOCATABLE :: uref_d(:,:,:), vref_d(:,:,:)
   LOGICAL:: ifile
   INTEGER :: n, ngrids, iunit
   INTEGER :: i, j, k, g
   INTEGER :: nbfaces = 6
+  INTEGER :: gridtypes(1:2)
+  INTEGER :: gridtype, gtype
 
   TYPE(fv_grid_type) :: gridstruct
   ! ----------------------------------------------------------
 
+
+  gridtypes(1) = 0
+  gridtypes(2) = 2
 
   WRITE(icname,'(I8)') ic
   icname=trim(adjustl(trim(icname)))
@@ -5511,162 +5506,110 @@ SUBROUTINE writeref
         ! Reference solution is required at this time
         WRITE(ytime,'(i8)') INT(reftime(ilist))
         DO g = 1, ngrids
-           gridstruct%grid_type = 2
-           call init_grid_cs(gridstruct, N)
+           DO gtype = 1, 2 
+              gridstruct%grid_type = gridtypes(gtype)
+              call init_grid_cs(gridstruct, N)
+
+              WRITE(gn,'(i8)') INT(gridtypes(gtype))
+              !------------------------------------------------------------------------------------------  
+              ! save grid
+              IF(ilist==1)THEN
+                 WRITE(npx,'(i8)') N
+                 DO k = 1, 6
+                    ! lon
+                    write(face,'(i8)') k
+                    filename = trim(dumpdir)//'g'//trim(adjustl(gn))//'_N'//trim(adjustl(npx))&
+                    //"_face"//trim(adjustl(face))//'_lon.dat'
+                    CALL getunit(iunit)
+                    OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
+                    WRITE(iunit) gridstruct%bgrid(1:N+1,1:N+1,k)%lon
+                    CLOSE(iunit)
+
+                    ! lat
+                    filename = trim(dumpdir)//'g'//trim(adjustl(gn))//'_N'//trim(adjustl(npx))&
+                    //"_face"//trim(adjustl(face))//'_lat.dat'
+                    CALL getunit(iunit)
+                    OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
+                    WRITE(iunit) gridstruct%bgrid(1:N+1,1:N+1,k)%lat
+                    CLOSE(iunit)
+                 ENDDO
+              ENDIF
+              !------------------------------------------------------------------------------------------  
 
 
-           !------------------------------------------------------------------------------------------  
-           ! save grid
-           IF(ilist==1)THEN
+              ! Output reference solution
+              ALLOCATE(href(1:N,1:N,1:nbfaces))
+              ALLOCATE(uref(1:N,1:N,1:nbfaces))
+              ALLOCATE(vref(1:N,1:N,1:nbfaces))
+              DO k = 1, nbfaces
+                DO i = 1, N
+                  CALL interpref (gridstruct%agrid(i,:,k)%lon, gridstruct%agrid(i,:,k)%lat, href(i,:,k), N)
+                  CALL interprefu(gridstruct%agrid(i,:,k)%lon, gridstruct%agrid(i,:,k)%lat, uref(i,:,k), N)
+                  CALL interprefv(gridstruct%agrid(i,:,k)%lon, gridstruct%agrid(i,:,k)%lat, vref(i,:,k), N)
+                ENDDO
+              ENDDO
+
+
+              ! fluid depth
               WRITE(npx,'(i8)') N
+              filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'//&
+              trim(adjustl(npx))//'_h_t'//trim(adjustl(ytime))//'.dat'
+              PRINT *,'Creating reference solution file for h: ', filename
               DO k = 1, 6
-                 ! lon
                  write(face,'(i8)') k
-                 filename = trim(dumpdir)//'g2_N'//trim(adjustl(npx))//"_face"//trim(adjustl(face))//'_lon.dat'
-                 CALL getunit(iunit)
-                 OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
-                 WRITE(iunit) gridstruct%bgrid(1:N+1,1:N+1,k)%lon
-                 CLOSE(iunit)
+                 filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'&
+                 //trim(adjustl(npx))//'_h_t'//trim(adjustl(ytime))//"_face"//trim(adjustl(face))//'.dat'
+                 print*, filename
 
-                 ! lat
-                 filename = trim(dumpdir)//'g2_N'//trim(adjustl(npx))//"_face"//trim(adjustl(face))//'_lat.dat'
                  CALL getunit(iunit)
                  OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
-                 WRITE(iunit) gridstruct%bgrid(1:N+1,1:N+1,k)%lat
+                 WRITE(iunit) href(:,:,k)
                  CLOSE(iunit)
               ENDDO
-           ENDIF
-           !------------------------------------------------------------------------------------------  
+
+              ! zonal velocity u
+              WRITE(npx,'(i8)') N
+              filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'&
+              //trim(adjustl(npx))//'_u_t'//trim(adjustl(ytime))//'.dat'
+              PRINT *,'Creating reference solution file for u: ', filename
+              DO k = 1, 6
+                 write(face,'(i8)') k
+                 filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'&
+                 //trim(adjustl(npx))//'_u_t'//trim(adjustl(ytime))&
+                 //"_face"//trim(adjustl(face))//'.dat'
+                 print*, filename
+
+                 CALL getunit(iunit)
+                 OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
+                 WRITE(iunit) uref(:,:,k)
+                 CLOSE(iunit)
+              ENDDO
+
+               ! meridional velocity v
+              WRITE(npx,'(i8)') N
+              filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'&
+              //trim(adjustl(npx))//'_v_t'//trim(adjustl(ytime))//'.dat'
+              PRINT *,'Creating reference solution file for v: ', filename
+              DO k = 1, 6
+                 write(face,'(i8)') k
+                 filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'&
+                 //trim(adjustl(npx))//'_v_t'//trim(adjustl(ytime))&
+                 //"_face"//trim(adjustl(face))//'.dat'
+                 print*, filename
+
+                 CALL getunit(iunit)
+                 OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
+                 WRITE(iunit) vref(:,:,k)
+                 CLOSE(iunit)
+              ENDDO
 
 
-           ! Output reference solution
-           ALLOCATE(href(1:N,1:N,1:nbfaces))
-           ALLOCATE(uref(1:N,1:N,1:nbfaces))
-           ALLOCATE(vref(1:N,1:N,1:nbfaces))
-           DO k = 1, nbfaces
-             DO i = 1, N
-               CALL interpref (gridstruct%agrid(i,:,k)%lon, gridstruct%agrid(i,:,k)%lat, href(i,:,k), N)
-               CALL interprefu(gridstruct%agrid(i,:,k)%lon, gridstruct%agrid(i,:,k)%lat, uref(i,:,k), N)
-               CALL interprefv(gridstruct%agrid(i,:,k)%lon, gridstruct%agrid(i,:,k)%lat, vref(i,:,k), N)
-             ENDDO
+              CALL end_grid_cs(gridstruct)
+              DEALLOCATE(href)
+              DEALLOCATE(uref)
+              DEALLOCATE(vref)
            ENDDO
-
-           ! field at cgrid point (uc,vd)
-           ALLOCATE(uref_c(1:N+1,1:N,1:nbfaces))
-           ALLOCATE(vref_d(1:N+1,1:N,1:nbfaces))
-           DO k = 1, nbfaces
-             DO i = 1, N+1
-               CALL interprefu(gridstruct%cgrid(i,:,k)%lon, gridstruct%cgrid(i,:,k)%lat, uref_c(i,:,k), N)
-               CALL interprefv(gridstruct%cgrid(i,:,k)%lon, gridstruct%cgrid(i,:,k)%lat, vref_d(i,:,k), N)
-             ENDDO
-           ENDDO
-
-           ! d grid fields
-           ALLOCATE(uref_d(1:N,1:N+1,1:nbfaces))
-           ALLOCATE(vref_c(1:N,1:N+1,1:nbfaces))
-           DO k = 1, nbfaces
-             DO j = 1, N+1
-               CALL interprefu(gridstruct%dgrid(:,j,k)%lon, gridstruct%dgrid(:,j,k)%lat, uref_d(:,j,k), N)
-               CALL interprefv(gridstruct%dgrid(:,j,k)%lon, gridstruct%dgrid(:,j,k)%lat, vref_c(:,j,k), N)
-             ENDDO
-           ENDDO
-
-
-           ! fluid depth
-           WRITE(npx,'(i8)') N
-           filename = trim(dumpdir)//'tc'//trim(icname)//'_g2_N'//trim(adjustl(npx))//'_h_t'//trim(adjustl(ytime))//'.dat'
-           PRINT *,'Creating reference solution file for h: ', filename
-           DO k = 1, 6
-              write(face,'(i8)') k
-              filename = trim(dumpdir)//'tc'//trim(icname)//'_g2_N'//trim(adjustl(npx))//'_h_t'//trim(adjustl(ytime))&
-              //"_face"//trim(adjustl(face))//'.dat'
-              print*, filename
-
-              CALL getunit(iunit)
-              OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
-              WRITE(iunit) href(:,:,k)
-              CLOSE(iunit)
-           ENDDO
-
-           ! zonal velocity u
-           WRITE(npx,'(i8)') N
-           filename = trim(dumpdir)//'tc'//trim(icname)//'_g2_N'//trim(adjustl(npx))//'_u_t'//trim(adjustl(ytime))//'.dat'
-           PRINT *,'Creating reference solution file for u: ', filename
-           DO k = 1, 6
-              write(face,'(i8)') k
-              filename = trim(dumpdir)//'tc'//trim(icname)//'_g2_N'//trim(adjustl(npx))//'_u_t'//trim(adjustl(ytime))&
-              //"_face"//trim(adjustl(face))//'.dat'
-              print*, filename
-
-              CALL getunit(iunit)
-              OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
-              WRITE(iunit) uref(:,:,k)
-              CLOSE(iunit)
-           ENDDO
-
-            ! meridional velocity v
-           WRITE(npx,'(i8)') N
-           filename = trim(dumpdir)//'tc'//trim(icname)//'_g2_N'//trim(adjustl(npx))//'_v_t'//trim(adjustl(ytime))//'.dat'
-           PRINT *,'Creating reference solution file for v: ', filename
-           DO k = 1, 6
-              write(face,'(i8)') k
-              filename = trim(dumpdir)//'tc'//trim(icname)//'_g2_N'//trim(adjustl(npx))//'_v_t'//trim(adjustl(ytime))&
-              //"_face"//trim(adjustl(face))//'.dat'
-              print*, filename
-
-              CALL getunit(iunit)
-              OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
-              WRITE(iunit) vref(:,:,k)
-              CLOSE(iunit)
-           ENDDO
-
-
-           !...
-           ! zonal velocity u
-           WRITE(npx,'(i8)') N
-           filename = trim(dumpdir)//'tc'//trim(icname)//'_g2_N'//trim(adjustl(npx))//'_ud_t'//trim(adjustl(ytime))//'.dat'
-           PRINT *,'Creating reference solution file for u: ', filename
-           DO k = 1, 6
-              write(face,'(i8)') k
-              filename = trim(dumpdir)//'tc'//trim(icname)//'_g2_N'//trim(adjustl(npx))//'_ud_t'//trim(adjustl(ytime))&
-              //"_face"//trim(adjustl(face))//'.dat'
-              print*, filename
-
-              CALL getunit(iunit)
-              OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
-              WRITE(iunit) uref_d(:,:,k)
-              CLOSE(iunit)
-           ENDDO
-
-            ! meridional velocity v
-           WRITE(npx,'(i8)') N
-           filename = trim(dumpdir)//'tc'//trim(icname)//'_g2_N'//trim(adjustl(npx))//'_vd_t'//trim(adjustl(ytime))//'.dat'
-           PRINT *,'Creating reference solution file for v: ', filename
-           DO k = 1, 6
-              write(face,'(i8)') k
-              filename = trim(dumpdir)//'tc'//trim(icname)//'_g2_N'//trim(adjustl(npx))//'_vd_t'//trim(adjustl(ytime))&
-              //"_face"//trim(adjustl(face))//'.dat'
-              print*, filename
-
-              CALL getunit(iunit)
-              OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
-              WRITE(iunit) vref_d(:,:,k)
-              CLOSE(iunit)
-           ENDDO
-
-!print*, maxval(abs( 0.5d0*(uref_d(1:N,2:N+1,:)+uref_d(1:N,1:N,:)) - uref(1:N,1:N,:)))
-!print*, maxval(abs( 0.5d0*(vref_d(2:N+1,1:N,:)+vref_d(1:N,1:N,:)) - vref(1:N,1:N,:)))
-!read(*,*)
-
-           CALL end_grid_cs(gridstruct)
            N = N*2
-           DEALLOCATE(href)
-           DEALLOCATE(uref)
-           DEALLOCATE(vref)
-           DEALLOCATE(uref_c)
-           DEALLOCATE(vref_c)
-           DEALLOCATE(uref_d)
-           DEALLOCATE(vref_d)
         ENDDO
 
      ENDIF
@@ -6793,6 +6736,14 @@ END SUBROUTINE getunit
  ! - nair, r. d., thomas, s. j., & loft, r. d. (2005). a discontinuous galerkin transport scheme on the
  ! cubed sphere, monthly weather review, 133(4), 814-828. retrieved feb 7, 2022, 
  ! from https://journals.ametsoc.org/view/journals/mwre/133/4/mwr2890.1.xml
+ ! panel indexes distribution
+ !      +---+
+ !      | 3 |
+ !  +---+---+---+---+
+ !  | 5 | 1 | 2 | 4 |
+ !  +---+---+---+---+
+ !      | 6 |
+ !      +---+
  !
  !---------------------------------------------------------------
  real(kind=8), intent(in) :: x ! local coordinates
@@ -6883,21 +6834,8 @@ subroutine init_grid_cs(gridstruct, N)
    allocate(tan_angle_b(is:ie+1))
    allocate(tan_angle_a(is:ie))
 
-   allocate(gridstruct%agrid(is:ie  , js:je  , 1:nbfaces))
-   allocate(gridstruct%bgrid(is:ie+1, js:je+1, 1:nbfaces))
-   allocate(gridstruct%cgrid(is:ie+1, js:je  , 1:nbfaces))
-   allocate(gridstruct%dgrid(is:ie  , js:je+1, 1:nbfaces))
-
-   allocate(gridstruct%sina_c(is:ie+1, js:je  ))
-   allocate(gridstruct%cosa_c(is:ie+1, js:je  ))
-   allocate(gridstruct%sina_d(is:ie  , js:je+1))
-   allocate(gridstruct%cosa_d(is:ie  , js:je+1))
- 
-   allocate(gridstruct%c_contra2l(1:2,1:2,is:ie+1, js:je, 1:nbfaces  ))
-   allocate(gridstruct%c_l2contra(1:2,1:2,is:ie+1, js:je, 1:nbfaces  ))
-
-   allocate(gridstruct%d_contra2l(1:2,1:2,is:ie, js:je+1, 1:nbfaces))
-   allocate(gridstruct%d_l2contra(1:2,1:2,is:ie, js:je+1, 1:nbfaces))
+   allocate(gridstruct%agrid(is:ie,js:je,1:nbfaces))
+   allocate(gridstruct%bgrid(is:ie+1,js:je+1,1:nbfaces))
  
    if(gridstruct%grid_type==0) then !equiangular grid
       aref = dasin(1.d0/dsqrt(3.d0))
@@ -6955,129 +6893,6 @@ subroutine init_grid_cs(gridstruct, N)
    enddo
 
 
-   !--------------------------------------------------------------------------------------------
-   ! compute cgrid
-   do k = 1, nbfaces
-      do i = is, ie+1
-         do j = js, je
-            gridstruct%cgrid(i,j,k)%p = (gridstruct%bgrid(i,j+1,k)%p + gridstruct%bgrid(i,j,k)%p)*0.5d0 
-            gridstruct%cgrid(i,j,k)%p = gridstruct%cgrid(i,j,k)%p/norm2(gridstruct%cgrid(i,j,k)%p)
-            call cart2sph ( gridstruct%cgrid(i,j,k)%p(1), gridstruct%cgrid(i,j,k)%p(2), gridstruct%cgrid(i,j,k)%p(3), &
-            gridstruct%cgrid(i,j,k)%lon, gridstruct%cgrid(i,j,k)%lat)
-         enddo
-      enddo
-   enddo
-   !--------------------------------------------------------------------------------------------
-
-   !--------------------------------------------------------------------------------------------
-   ! compute dgrid
-   do k = 1, nbfaces
-      do i = is, ie
-         do j = js, je+1
-            gridstruct%dgrid(i,j,k)%p = (gridstruct%bgrid(i+1,j,k)%p + gridstruct%bgrid(i,j,k)%p)*0.5d0 
-            gridstruct%dgrid(i,j,k)%p = gridstruct%dgrid(i,j,k)%p/norm2(gridstruct%dgrid(i,j,k)%p)
-            call cart2sph ( gridstruct%dgrid(i,j,k)%p(1), gridstruct%dgrid(i,j,k)%p(2), gridstruct%dgrid(i,j,k)%p(3),&
-            gridstruct%dgrid(i,j,k)%lon, gridstruct%dgrid(i,j,k)%lat)
-         enddo
-      enddo
-   enddo
-   !--------------------------------------------------------------------------------------------
-
-
-   !--------------------------------------------------------------------------------------------
-
-
-   ! conversion matrices
-   do k = 1, nbfaces
-      ! C grid
-      do i = is, ie+1
-         do j = js, je
-            ! get latlon tangent vector
-            call unit_vect_latlon_ext([gridstruct%cgrid(i,j,k)%lon, gridstruct%cgrid(i,j,k)%lat], elon, elat)
-
-            p0 = gridstruct%cgrid(i,j,k)%p
-            px = gridstruct%agrid(i,j,k)%p
-            py = gridstruct%bgrid(i,j+1,k)%p
-
-            ! unit vector - x direction
-            ex = px-p0
-            call proj_vec_sphere(ex, p0, ex)
-
-            ex = ex/norm2(ex)
-            ! unit vector - y direction
-            ey = py-p0
-            call proj_vec_sphere(ey, p0, ey)
-            ey = ey/norm2(ey)
-
-            if(p==1) then
-               gridstruct%cosa_c(i,j) = dot_product(ex, ey)
-               gridstruct%sina_c(i,j) = dsqrt(1.d0 - gridstruct%cosa_c(i,j)**2)
-            endif
-
-            a11 = dot_product(ex, elon)
-            a12 = dot_product(ey, elon)
-            a21 = dot_product(ex, elat)
-            a22 = dot_product(ey, elat)
-            det = a11*a22 - a21*a12
-
-            ! Contra to latlon matrix
-            gridstruct%c_contra2l(1,1,i,j,k) = a11
-            gridstruct%c_contra2l(1,2,i,j,k) = a12
-            gridstruct%c_contra2l(2,1,i,j,k) = a21
-            gridstruct%c_contra2l(2,2,i,j,k) = a22
-
-            ! latlon to contra matrix
-            gridstruct%c_l2contra(1,1,i,j,k) =  a22/det
-            gridstruct%c_l2contra(1,2,i,j,k) = -a12/det
-            gridstruct%c_l2contra(2,1,i,j,k) = -a21/det
-            gridstruct%c_l2contra(2,2,i,j,k) =  a11/det
-         enddo
-      enddo
-
-      ! D grid
-      do i = is, ie
-         do j = js, je+1
-            ! get latlon tangent vector
-            call unit_vect_latlon_ext([gridstruct%dgrid(i,j,k)%lon, gridstruct%dgrid(i,j,k)%lat], elon, elat)
-            p0 = gridstruct%dgrid(i,j,k)%p
-            py = gridstruct%agrid(i,j,k)%p
-            px = gridstruct%bgrid(i+1,j,k)%p
-
-            ! unit vector - x direction
-            ex = px-p0
-            call proj_vec_sphere(ex, p0, ex)
-            ex = ex/norm2(ex)
-
-            ! unit vector - y direction
-            ey = py-p0
-            call proj_vec_sphere(ey, p0, ey)
-            ey = ey/norm2(ey)
-
-            if(p==1) then
-               gridstruct%cosa_d(i,j) = dot_product(ex, ey)
-               gridstruct%sina_d(i,j) = dsqrt(1.d0 - gridstruct%cosa_d(i,j)**2)
-            endif
-
-            a11 = dot_product(ex, elon)
-            a12 = dot_product(ey, elon)
-            a21 = dot_product(ex, elat)
-            a22 = dot_product(ey, elat)
-            det = a11*a22 - a21*a12
-
-            ! Contra to latlon matrix
-            gridstruct%d_contra2l(1,1,i,j,k) = a11
-            gridstruct%d_contra2l(1,2,i,j,k) = a12
-            gridstruct%d_contra2l(2,1,i,j,k) = a21
-            gridstruct%d_contra2l(2,2,i,j,k) = a22
-
-            ! latlon to contra matrix
-            gridstruct%d_l2contra(1,1,i,j,k)=  a22/det
-            gridstruct%d_l2contra(1,2,i,j,k)= -a12/det
-            gridstruct%d_l2contra(2,1,i,j,k)= -a21/det
-            gridstruct%d_l2contra(2,2,i,j,k)=  a11/det
-         enddo
-      enddo
-   enddo
    deallocate(gridline_a)
    deallocate(gridline_b)
    deallocate(tan_angle_a)
@@ -7090,19 +6905,6 @@ subroutine end_grid_cs(gridstruct)
 
    deallocate(gridstruct%agrid)
    deallocate(gridstruct%bgrid)
-   deallocate(gridstruct%cgrid)
-   deallocate(gridstruct%dgrid)
-
-   deallocate(gridstruct%sina_c)
-   deallocate(gridstruct%cosa_c)
-   deallocate(gridstruct%sina_d)
-   deallocate(gridstruct%cosa_d)
- 
-   deallocate(gridstruct%c_contra2l)
-   deallocate(gridstruct%c_l2contra)
-
-   deallocate(gridstruct%d_contra2l)
-   deallocate(gridstruct%d_l2contra)
 
 end subroutine end_grid_cs
 subroutine cart2sph ( x, y, z, lon, lat )
