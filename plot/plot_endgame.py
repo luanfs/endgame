@@ -14,7 +14,7 @@ figformat='png'
 # some constants
 N = 128
 M = N//2
-tc = 7 # test case
+tc = 5 # test case
 sec2day=86400
 
 
@@ -38,6 +38,21 @@ lat = np.linspace(-90,90,M)
 lon = np.linspace(0,360,N)
 lat, lon = np.meshgrid(lat,lon)
 
+if tc==5: #flow over a mountain
+   hmin, hmax = 5000.0, 6000.0
+   umin, umax = -10, 40
+   vmin, vmax = -25, 25
+   pvmin, pvmax = -3.1e-08, 3.1e-08
+   vortmin, vortmax = -3.6e-05, 4.7e-05
+
+elif tc==7: #barotropic instability
+   hmin, hmax = 8400, 10500
+   umin, umax = -20, 85
+   vmin, vmax = -45, 45
+   pvmin, pvmax = -1.5e-08, 2.4e-08
+   vortmin, vortmax = -8.9e-05, 9.8e-05
+
+
 fields = [h,u,v,vort,pv]
 field_names = ('h','u','v','pv','vort')
 for t in range(0,len(timedata)):
@@ -49,11 +64,11 @@ for t in range(0,len(timedata)):
       field[:,:,t] = z
 
 
-hmin, hmax = np.amin(fields[0]), np.amax(fields[0])
-umin, umax = np.amin(fields[1]), np.amax(fields[1])
-vmin, vmax = np.amin(fields[2]), np.amax(fields[2])
-pvmin, pvmax = np.amin(fields[3]), np.amax(fields[3])
-vortmin, vortmax = np.amin(fields[4]), np.amax(fields[4])
+#hmin, hmax = np.amin(fields[0]), np.amax(fields[0])
+#umin, umax = np.amin(fields[1]), np.amax(fields[1])
+#vmin, vmax = np.amin(fields[2]), np.amax(fields[2])
+#pvmin, pvmax = np.amin(fields[3]), np.amax(fields[3])
+#vortmin, vortmax = np.amin(fields[4]), np.amax(fields[4])
 fmins = [hmin, umin, vmin, pvmin, vortmin]
 fmaxs = [hmax, umax, vmax, pvmax, vortmax]
 

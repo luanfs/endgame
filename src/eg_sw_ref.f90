@@ -101,7 +101,7 @@ MODULE grid
 
   ! Set ng = p - 2 with the following
   !INTEGER, PARAMETER :: p = 9, nx = 2**p, ny = 2**(p-1) !512x256
-  !INTEGER, PARAMETER :: p = 11, nx = 2**p, ny = 2**(p-1)
+  INTEGER, PARAMETER :: p = 12, nx = 2**p, ny = 2**(p-1)
   !INTEGER, PARAMETER :: p = 8, nx = 2**p, ny = 2**(p-1) !256x128
   INTEGER, PARAMETER :: p = 7, nx = 2**p, ny = 2**(p-1)
   ! Or set ng = p - 1 with the following
@@ -690,7 +690,7 @@ SUBROUTINE initial
         phis0 = 2000.0d0*9.80616d0
         rr0 = pi/9.0d0
         latc = pi/6.0d0
-        longc = 3.0d0*pi/2.0d0 !0.5d0*pi
+        longc = 3.0d0*pi/2.0d0 + pi/4.d0!0.5d0*pi
         DO j = 1, ny
            DO i = 1, nx  
               ! Isolated mountain
@@ -1021,8 +1021,8 @@ SUBROUTINE timing
   !dt = 200.0d0
   !dt = 400.0d0
   !dt = 600.0d0
-  dt = 1200.0d0
-  !dt = 50.0d0 !225.0d0
+  !dt = 1200.0d0
+  dt = 50.0d0 !225.0d0
   !dt = 20.0d0 !225.0d0
   !dt = 10800.0d0
   hdt = 0.5d0*dt

@@ -11,22 +11,28 @@ nbfaces = 6
 figformat='png'
 
 # some constants
-N    = 192 # number of cells
-tc   = 7 # test case
+N    = 48 # number of cells
+tc   = 5 # test case
 gtype=0
 sec2day=86400
 
 if tc==2: # steady flow
    hmin, hmax = 1000.0, 3000.0
    umin, umax = -30, -60
+
 elif tc==5: #flow over a mountain
    hmin, hmax = 5000.0, 6000.0
    umin, umax = -10, 40
    vmin, vmax = -25, 25
+   pvmin, pvmax = -3.1e-08, 3.1e-08
+   vortmin, vortmax = -3.6e-05, 4.7e-05
+
 elif tc==7: #barotropic instability
-   hmin, hmax = 8800, 10500
-   umin, umax = -50, 50
-   vmin, vmax = -50, 50
+   hmin, hmax = 8400, 10500
+   umin, umax = -20, 85
+   vmin, vmax = -45, 45
+   pvmin, pvmax = -1.5e-08, 2.4e-08
+   vortmin, vortmax = -8.9e-05, 9.8e-05
 
 map_projection='mercator'
 dpi=100
