@@ -13,7 +13,8 @@ figformat='png'
 # some constants
 N    = 48 # number of cells
 tc   = 5 # test case
-gtype=0
+gtype = 2
+mp = 'c'
 sec2day=86400
 
 if tc==2: # steady flow
@@ -53,7 +54,7 @@ for t in range(0,len(timedata)):
    for p in range(0,6):
       
       # get h
-      basename = "tc"+str(tc)+"_g"+str(gtype)+"_N"+str(N)+"_h"
+      basename = "tc"+str(tc)+"_g"+str(gtype)+'.'+mp+"_N"+str(N)+"_h"
       filename = basename+'_t'+str(timedata[t])+"_face"+str(p+1)+'.dat'
       z = open(datadir+filename, 'rb')
       z = np.fromfile(z, dtype=np.float64)
@@ -61,7 +62,7 @@ for t in range(0,len(timedata)):
       h[:,:,p,t] = z
 
       # get u
-      basename = "tc"+str(tc)+"_g"+str(gtype)+"_N"+str(N)+"_u"
+      basename = "tc"+str(tc)+"_g"+str(gtype)+'.'+mp+"_N"+str(N)+"_u"
       filename = basename+'_t'+str(timedata[t])+"_face"+str(p+1)+'.dat'
       z = open(datadir+filename, 'rb')
       z = np.fromfile(z, dtype=np.float64)
@@ -70,7 +71,7 @@ for t in range(0,len(timedata)):
       u[:,:,p,t] = z
 
       # get v
-      basename = "tc"+str(tc)+"_g"+str(gtype)+"_N"+str(N)+"_v"
+      basename = "tc"+str(tc)+"_g"+str(gtype)+'.'+mp+"_N"+str(N)+"_v"
       filename = basename+'_t'+str(timedata[t])+"_face"+str(p+1)+'.dat'
       z = open(datadir+filename, 'rb')
       z = np.fromfile(z, dtype=np.float64)
@@ -80,20 +81,19 @@ for t in range(0,len(timedata)):
    # plot h graph
    colormap = 'jet'
    title ="TC"+str(tc)+" - h - time (days) = "+str(timedata[t]/sec2day)
-   output_name =  graphdir+"tc"+str(tc)+"_g"+str(gtype)+"_N"+str(N)+"_h_t"+str(timedata[t])
+   output_name =  graphdir+"tc"+str(tc)+"_g"+str(gtype)+'.'+mp+"_N"+str(N)+"_h_t"+str(timedata[t])
    plot_scalarfield(h[:,:,:,t], map_projection, title, output_name, colormap, hmin, hmax, dpi, figformat, N)
 
    # plot u graph
    colormap = 'jet'
    title ="TC"+str(tc)+" - u - time (days) = "+str(timedata[t]/sec2day)
-   output_name =  graphdir+"tc"+str(tc)+"_g"+str(gtype)+"_N"+str(N)+"_u_t"+str(timedata[t])
+   output_name =  graphdir+"tc"+str(tc)+"_g"+str(gtype)+'.'+mp+"_N"+str(N)+"_u_t"+str(timedata[t])
    plot_scalarfield(u[:,:,:,t], map_projection, title, output_name, colormap, umin, umax, dpi, figformat, N)
    #print(np.amin(u[:,:,:,t]), np.amax(u[:,:,:,t]) )
 
    # plot v graph
    colormap = 'jet'
    title ="TC"+str(tc)+" - v - time (days) = "+str(timedata[t]/sec2day)
-   output_name =  graphdir+"tc"+str(tc)+"_g"+str(gtype)+"_N"+str(N)+"_v_t"+str(timedata[t])
+   output_name =  graphdir+"tc"+str(tc)+"_g"+str(gtype)+'.'+mp+"_N"+str(N)+"_v_t"+str(timedata[t])
    plot_scalarfield(v[:,:,:,t], map_projection, title, output_name, colormap, vmin, vmax, dpi, figformat, N)
    #print(np.amin(v[:,:,:,t]), np.amax(v[:,:,:,t]) )
-

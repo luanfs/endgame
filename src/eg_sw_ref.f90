@@ -31,7 +31,8 @@ MODULE FV3
   ! grid structure
   !-------------------------------------------------
   type fv_grid_type
-     type(point_structure), allocatable, dimension(:,:,:) :: agrid
+     type(point_structure), allocatable, dimension(:,:,:) :: agrid_sph
+     type(point_structure), allocatable, dimension(:,:,:) :: agrid_cube
      type(point_structure), allocatable, dimension(:,:,:) :: bgrid
      real*8 :: dx
      integer :: grid_type  ! 0-equiedge grid; 2-equiangular
@@ -101,7 +102,7 @@ MODULE grid
 
   ! Set ng = p - 2 with the following
   !INTEGER, PARAMETER :: p = 9, nx = 2**p, ny = 2**(p-1) !512x256
-  INTEGER, PARAMETER :: p = 12, nx = 2**p, ny = 2**(p-1)
+  !INTEGER, PARAMETER :: p = 11, nx = 2**p, ny = 2**(p-1)
   !INTEGER, PARAMETER :: p = 8, nx = 2**p, ny = 2**(p-1) !256x128
   INTEGER, PARAMETER :: p = 7, nx = 2**p, ny = 2**(p-1)
   ! Or set ng = p - 1 with the following
@@ -1021,8 +1022,8 @@ SUBROUTINE timing
   !dt = 200.0d0
   !dt = 400.0d0
   !dt = 600.0d0
-  !dt = 1200.0d0
-  dt = 50.0d0 !225.0d0
+  dt = 1200.0d0
+  !dt = 50.0d0 !225.0d0
   !dt = 20.0d0 !225.0d0
   !dt = 10800.0d0
   hdt = 0.5d0*dt
@@ -5541,23 +5542,24 @@ SUBROUTINE writeref
               ALLOCATE(href(1:N,1:N,1:nbfaces))
               ALLOCATE(uref(1:N,1:N,1:nbfaces))
               ALLOCATE(vref(1:N,1:N,1:nbfaces))
+
+              ! First we consider agrid_sph
               DO k = 1, nbfaces
                 DO i = 1, N
-                  CALL interpref (gridstruct%agrid(i,:,k)%lon, gridstruct%agrid(i,:,k)%lat, href(i,:,k), N)
-                  CALL interprefu(gridstruct%agrid(i,:,k)%lon, gridstruct%agrid(i,:,k)%lat, uref(i,:,k), N)
-                  CALL interprefv(gridstruct%agrid(i,:,k)%lon, gridstruct%agrid(i,:,k)%lat, vref(i,:,k), N)
+                  CALL interpref (gridstruct%agrid_sph(i,:,k)%lon, gridstruct%agrid_sph(i,:,k)%lat, href(i,:,k), N)
+                  CALL interprefu(gridstruct%agrid_sph(i,:,k)%lon, gridstruct%agrid_sph(i,:,k)%lat, uref(i,:,k), N)
+                  CALL interprefv(gridstruct%agrid_sph(i,:,k)%lon, gridstruct%agrid_sph(i,:,k)%lat, vref(i,:,k), N)
                 ENDDO
               ENDDO
 
-
               ! fluid depth
               WRITE(npx,'(i8)') N
-              filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'//&
+              filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.s_N'//&
               trim(adjustl(npx))//'_h_t'//trim(adjustl(ytime))//'.dat'
               PRINT *,'Creating reference solution file for h: ', filename
               DO k = 1, 6
                  write(face,'(i8)') k
-                 filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'&
+                 filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.s_N'&
                  //trim(adjustl(npx))//'_h_t'//trim(adjustl(ytime))//"_face"//trim(adjustl(face))//'.dat'
                  print*, filename
 
@@ -5569,12 +5571,12 @@ SUBROUTINE writeref
 
               ! zonal velocity u
               WRITE(npx,'(i8)') N
-              filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'&
+              filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.s_N'&
               //trim(adjustl(npx))//'_u_t'//trim(adjustl(ytime))//'.dat'
               PRINT *,'Creating reference solution file for u: ', filename
               DO k = 1, 6
                  write(face,'(i8)') k
-                 filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'&
+                 filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.s_N'&
                  //trim(adjustl(npx))//'_u_t'//trim(adjustl(ytime))&
                  //"_face"//trim(adjustl(face))//'.dat'
                  print*, filename
@@ -5587,12 +5589,12 @@ SUBROUTINE writeref
 
                ! meridional velocity v
               WRITE(npx,'(i8)') N
-              filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'&
+              filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.s_N'&
               //trim(adjustl(npx))//'_v_t'//trim(adjustl(ytime))//'.dat'
               PRINT *,'Creating reference solution file for v: ', filename
               DO k = 1, 6
                  write(face,'(i8)') k
-                 filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'&
+                 filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.s_N'&
                  //trim(adjustl(npx))//'_v_t'//trim(adjustl(ytime))&
                  //"_face"//trim(adjustl(face))//'.dat'
                  print*, filename
@@ -5603,6 +5605,75 @@ SUBROUTINE writeref
                  CLOSE(iunit)
               ENDDO
 
+
+
+
+
+
+
+
+              ! Now we consider agrid_cube
+              DO k = 1, nbfaces
+                DO i = 1, N
+                  CALL interpref (gridstruct%agrid_cube(i,:,k)%lon, gridstruct%agrid_cube(i,:,k)%lat, href(i,:,k), N)
+                  CALL interprefu(gridstruct%agrid_cube(i,:,k)%lon, gridstruct%agrid_cube(i,:,k)%lat, uref(i,:,k), N)
+                  CALL interprefv(gridstruct%agrid_cube(i,:,k)%lon, gridstruct%agrid_cube(i,:,k)%lat, vref(i,:,k), N)
+                ENDDO
+              ENDDO
+
+
+              ! fluid depth
+              WRITE(npx,'(i8)') N
+              filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.c_N'//&
+              trim(adjustl(npx))//'_h_t'//trim(adjustl(ytime))//'.dat'
+              PRINT *,'Creating reference solution file for h: ', filename
+              DO k = 1, 6
+                 write(face,'(i8)') k
+                 filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.c_N'&
+                 //trim(adjustl(npx))//'_h_t'//trim(adjustl(ytime))//"_face"//trim(adjustl(face))//'.dat'
+                 print*, filename
+
+                 CALL getunit(iunit)
+                 OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
+                 WRITE(iunit) href(:,:,k)
+                 CLOSE(iunit)
+              ENDDO
+
+              ! zonal velocity u
+              WRITE(npx,'(i8)') N
+              filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.c_N'&
+              //trim(adjustl(npx))//'_u_t'//trim(adjustl(ytime))//'.dat'
+              PRINT *,'Creating reference solution file for u: ', filename
+              DO k = 1, 6
+                 write(face,'(i8)') k
+                 filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.c_N'&
+                 //trim(adjustl(npx))//'_u_t'//trim(adjustl(ytime))&
+                 //"_face"//trim(adjustl(face))//'.dat'
+                 print*, filename
+
+                 CALL getunit(iunit)
+                 OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
+                 WRITE(iunit) uref(:,:,k)
+                 CLOSE(iunit)
+              ENDDO
+
+               ! meridional velocity v
+              WRITE(npx,'(i8)') N
+              filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.c_N'&
+              //trim(adjustl(npx))//'_v_t'//trim(adjustl(ytime))//'.dat'
+              PRINT *,'Creating reference solution file for v: ', filename
+              DO k = 1, 6
+                 write(face,'(i8)') k
+                 filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.c_N'&
+                 //trim(adjustl(npx))//'_v_t'//trim(adjustl(ytime))&
+                 //"_face"//trim(adjustl(face))//'.dat'
+                 print*, filename
+
+                 CALL getunit(iunit)
+                 OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
+                 WRITE(iunit) vref(:,:,k)
+                 CLOSE(iunit)
+              ENDDO
 
               CALL end_grid_cs(gridstruct)
               DEALLOCATE(href)
@@ -6834,7 +6905,8 @@ subroutine init_grid_cs(gridstruct, N)
    allocate(tan_angle_b(is:ie+1))
    allocate(tan_angle_a(is:ie))
 
-   allocate(gridstruct%agrid(is:ie,js:je,1:nbfaces))
+   allocate(gridstruct%agrid_sph(is:ie,js:je,1:nbfaces))
+   allocate(gridstruct%agrid_cube(is:ie,js:je,1:nbfaces))
    allocate(gridstruct%bgrid(is:ie+1,js:je+1,1:nbfaces))
  
    if(gridstruct%grid_type==0) then !equiangular grid
@@ -6879,15 +6951,29 @@ subroutine init_grid_cs(gridstruct, N)
    !--------------------------------------------------------------------------------------------
 
    !--------------------------------------------------------------------------------------------
-   ! compute agrid
+   ! compute agrid_sph
    do k = 1, nbfaces
       do i = is, ie
          do j = js, je
-            gridstruct%agrid(i,j,k)%p = (gridstruct%bgrid(i  ,j,k)%p + gridstruct%bgrid(i  ,j+1,k)%p &
+            gridstruct%agrid_sph(i,j,k)%p = (gridstruct%bgrid(i  ,j,k)%p + gridstruct%bgrid(i  ,j+1,k)%p &
                                        + gridstruct%bgrid(i+1,j,k)%p + gridstruct%bgrid(i+1,j+1,k)%p)*0.25d0 
-            gridstruct%agrid(i,j,k)%p = gridstruct%agrid(i,j,k)%p/norm2(gridstruct%agrid(i,j,k)%p)
-            call cart2sph ( gridstruct%agrid(i,j,k)%p(1), gridstruct%agrid(i,j,k)%p(2), &
-           gridstruct% agrid(i,j,k)%p(3), gridstruct%agrid(i,j,k)%lon, gridstruct%agrid(i,j,k)%lat)
+            gridstruct%agrid_sph(i,j,k)%p = gridstruct%agrid_sph(i,j,k)%p/norm2(gridstruct%agrid_sph(i,j,k)%p)
+            call cart2sph ( gridstruct%agrid_sph(i,j,k)%p(1), gridstruct%agrid_sph(i,j,k)%p(2), &
+           gridstruct% agrid_sph(i,j,k)%p(3), gridstruct%agrid_sph(i,j,k)%lon, gridstruct%agrid_sph(i,j,k)%lat)
+         enddo
+      enddo
+   enddo
+
+   !--------------------------------------------------------------------------------------------
+   ! compute agrid_cube
+   do k = 1, nbfaces
+      do i = is, ie
+         x = tan_angle_a(i)
+         do j = js, je
+            y = tan_angle_a(j)
+            call equidistant_gnomonic_map(gridstruct%agrid_cube(i,j,k)%p, x, y, k)
+            call cart2sph ( gridstruct%agrid_cube(i,j,k)%p(1), gridstruct%agrid_cube(i,j,k)%p(2), &
+            gridstruct%agrid_cube(i,j,k)%p(3), gridstruct%agrid_cube(i,j,k)%lon, gridstruct%agrid_cube(i,j,k)%lat)
          enddo
       enddo
    enddo
@@ -6903,7 +6989,8 @@ subroutine end_grid_cs(gridstruct)
    USE FV3
    type(fv_grid_type), intent(INOUT) :: gridstruct
 
-   deallocate(gridstruct%agrid)
+   deallocate(gridstruct%agrid_cube)
+   deallocate(gridstruct%agrid_sph)
    deallocate(gridstruct%bgrid)
 
 end subroutine end_grid_cs
