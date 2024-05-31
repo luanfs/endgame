@@ -80,6 +80,7 @@ MODULE version
   ! ic = 6   Rossby Haurwitz wave TC06
   ! ic = 7   Galewsky et al. barotropically unstable jet - specify stream fn
   ! ic = 8   Like case 2 but with orography balancing u
+  ! ic = 105 Flow over Gaussian hill
 !!!!! Will be overwritten by input argument !!!!
   INTEGER :: ic = 7
 
@@ -101,10 +102,12 @@ MODULE grid
   ! Information about the grid size and resolution
 
   ! Set ng = p - 2 with the following
-  !INTEGER, PARAMETER :: p = 9, nx = 2**p, ny = 2**(p-1) !512x256
   !INTEGER, PARAMETER :: p = 11, nx = 2**p, ny = 2**(p-1)
+  !INTEGER, PARAMETER :: p = 10, nx = 2**p, ny = 2**(p-1)
+  !INTEGER, PARAMETER :: p = 9, nx = 2**p, ny = 2**(p-1) !512x256
   !INTEGER, PARAMETER :: p = 8, nx = 2**p, ny = 2**(p-1) !256x128
-  INTEGER, PARAMETER :: p = 7, nx = 2**p, ny = 2**(p-1)
+  !INTEGER, PARAMETER :: p = 7, nx = 2**p, ny = 2**(p-1)
+  INTEGER, PARAMETER :: p = 6, nx = 2**p, ny = 2**(p-1)
   ! Or set ng = p - 1 with the following
   ! INTEGER, PARAMETER :: p = 3, nx = 3*2**p, ny = 3*2**(p-1)
   ! INTEGER, PARAMETER :: p = 3, nx = 5*2**p, ny = 5*2**(p-1)
@@ -135,6 +138,9 @@ MODULE constants
 
   ! Twice Earth's rotation rate
   REAL*8 :: twoomega
+
+  ! Earth's rotation rate
+  REAL*8 :: omega
 
   ! Gravity
   REAL*8 :: gravity
@@ -363,6 +369,7 @@ PROGRAM sw
      WRITE (*,*) " ic = 6   Rossby Haurwitz wave TC06"
      WRITE (*,*) " ic = 7   Galewsky et al. barotropically unstable jet - specify stream fn"
      WRITE (*,*) " ic = 8   Like case 2 but with orography balancing u"
+     WRITE (*,*) " ic = 105 Flow over Gaussian hill"
      WRITE (*,*)
      WRITE (*,*) " DUMP_REF: dump or not reference solution"
      WRITE (*,*) "  Directory for grid files need to be set up manually in writeref"
@@ -515,15 +522,18 @@ SUBROUTINE setconst
   IMPLICIT NONE
 
   ! Set Earth's radius
-  rearth = 6371220.0
+  rearth = 6371200.0
 
   ! Set rotation rate
-  twoomega = 1.4584E-4
-  !twoomega = 0.0
+  if(ic==9) then
+     omega = 0.d0
+  else
+     omega = 7.2921E-005
+  endif
+  twoomega =  2.d0*omega
 
   ! Gravity
-  gravity = 9.80616D0
-
+  gravity = 9.80665d0
   ! Set reference geopotential for phi
   SELECT CASE(ic)
   CASE(1)
@@ -549,6 +559,11 @@ SUBROUTINE setconst
   CASE(8)
      phiref = 1.0d0*gravity ! for Hollingsworth test
      PRINT*, "IC 8 : Hollingsworth test with phi0 ", phiref
+  CASE(105)
+     phiref = 48209.48 ! minimax for case 5 TC05
+     !phiref = 5960.0d0*gravity
+     PRINT*, "IC 105: Flow over Gaussian hill"
+ 
   CASE DEFAULT
      WRITE(*,*) "Please set a valid initial condition and a"
      WRITE(*,*) " valid reference phi in setconst"
@@ -578,11 +593,11 @@ SUBROUTINE initial
   REAL*8 :: gwamp = 100.0d2, phimeangw = 1.0d5
   REAL*8 :: u00, phi00, sinr, cosr
   REAL*8 :: phis0, rr0, rr1, rr, latc, longc
-  REAL*8 :: wrw, krw, phi0rw, a, b, c
+  REAL*8 :: wrw, krw, phi0rw, a, b, c, lat, lon
   REAL*8 :: psigg(nygg+1), hgg(nygg+1), u1, u2, l1, l2, &
        lat0, lat1, umax, en, umen, dygg, psi1, psi2, &
        alpha, beta, totvol, totarea, hbar, den, num, hpert, &
-       lat2, e1, e2, coslat, c1, c2, c3, c4, pxyz(1:3), p0xyz(1:3)
+       lat2, e1, e2, coslat, c1, c2, c3, c4, pxyz(1:3), p0xyz(1:3), dist
 
   !PXT - Given by command line argument
   ! ic = 1   Resting, constant phi
@@ -655,16 +670,17 @@ SUBROUTINE initial
      u0 = 0.0d0
      v0 = 0.0d0
 
-  ELSEIF (ic == 2 .OR. ic == 5 ) THEN
+  ELSEIF (ic == 2 .OR. ic == 5 .or. ic == 105) THEN
 
      ! Balanced solid body rotation
      IF (ic == 2) THEN
         ! Test case 2
         u00 = 2.0d0*pi*rearth/(12.0d0*86400.0d0)
         phi00 = 2.94d4
+ 
         ! If changed, remmember to change also in module setconst
-     ELSEIF (ic == 5) THEN
-        ! Test case 5
+     ELSEIF (ic == 5 .or. ic == 105) THEN
+        ! Test case 5 or 105
         u00 = 20.0d0
         phi00 = 5960.0d0*gravity
         ! If changed, remmember to change also in module setconst
@@ -675,38 +691,59 @@ SUBROUTINE initial
 
      DO j = 1, ny
         DO i = 1, nx
-           phi0(i,j) = phi00 - 0.5*(rearth*twoomega*u00 + u00*u00)*singeolatp(i,j)**2
-           u0(i,j) = u00*(cosp(j)*cosr + SIN(xu(i))*sinp(j)*sinr)
+           phi0(i,j) = phi00 - (rearth*omega*u00 + 0.5d0*u00*u00)*singeolatp(i,j)**2
+           lon = geolonp(i,j)
+           lat = geolatp(i,j)
+           u0(i,j) = u00*dcos(lon)
         ENDDO
      ENDDO
 
      DO j = 1, ny+1
         DO i = 1, nx 
-           v0(i,j) = u00*COS(xv(i))*sinr
+           lon = xv(i)
+           lat = yv(j)
+           v0(i,j) = 0.d0
         ENDDO
      ENDDO
 
      IF (ic == 5 ) THEN
         ! Include mountain
-        phis0 = 2000.0d0*9.80616d0
+        phis0 = 2000.0d0*gravity
         rr0 = pi/9.0d0
         latc = pi/6.0d0
         longc = 3.0d0*pi/2.0d0 + pi/4.d0!0.5d0*pi
+        call sph2cart(longc, latc, p0xyz(1), p0xyz(2), p0xyz(3))
+        !print*, phis0, longc, latc, rr0, phi00, u00
+        !stop
         DO j = 1, ny
            DO i = 1, nx  
               ! Isolated mountain
-              rr = SQRT(MIN(rr0*rr0,(geolonp(i,j)-longc)**2 + (geolatp(i,j)-latc)**2))
-              phis(i,j) = phis0*(1.0 - rr/rr0)
+              call sph2cart(geolonp(i,j), geolatp(i,j), pxyz(1), pxyz(2), pxyz(3))
+              rr= dsqrt(dot_product( pxyz-p0xyz, pxyz-p0xyz))
+              phis(i,j) = phis0*dexp(-10.d0*rr)
+
+              !rr = SQRT(MIN(rr0*rr0,(geolonp(i,j)-longc)**2 + (geolatp(i,j)-latc)**2))
+              !phis(i,j) = phis0*(1.0 - rr/rr0)
            ENDDO
         ENDDO
         ! Correct phi to allow for orography
         phi0 = phi0 - phis
      ENDIF
 
-     ! P. Peixoto - smooth moutain - unsued
-     !
-     !    ! Include smooth mountain on thin layer
-     !
+     IF (ic == 105 ) THEN
+       ! Gaussian hill
+       longc=pi
+       latc =0.d0
+       call sph2cart(longc, latc, p0xyz(1), p0xyz(2), p0xyz(3))
+       DO j = 1, ny
+          DO i = 1, nx
+             call sph2cart(geolonp(i,j), geolatp(i,j), pxyz(1), pxyz(2), pxyz(3))
+             rr= dsqrt(dot_product( pxyz-p0xyz, pxyz-p0xyz))
+             !phi0(i,j) =  phi0(i,j) + gravity*hpert*dexp(-10.d0*rr)
+          ENDDO
+       ENDDO
+
+
      !    phis0 = 20.0d0*9.80616d0
      !    rr0 = pi/9.0d0
      !    latc = pi/6.0d0
@@ -737,6 +774,7 @@ SUBROUTINE initial
      !    !phi0 = phi0 - phis
      !
      !PXT
+     ENDIF
   ELSEIF (ic == 8) THEN
 
      u00 = 2.0d0*pi*rearth/(12.0d0*86400.0d0)
@@ -979,6 +1017,32 @@ SUBROUTINE initial
         ENDDO
      ENDDO
 
+  ELSEIF (ic == 9) THEN !divergent case
+     u00 = 2.0d0*pi*rearth/(12.0d0*86400.0d0)
+     phi00 = 3000.d0*gravity
+     print*, gravity, phi00, u00
+
+     DO j = 1, ny
+        DO i = 1, nx
+           phi0(i,j) = phi00! - (rearth*omega*u00 + 0.5d0*u00*u00)*singeolatp(i,j)**2
+           !u0(i,j) = u00*(cosp(j)*cosr + SIN(xu(i))*sinp(j)*sinr)
+          ! u0(i,j) = u00*cosp(j)*cosr
+           lon = geolonp(i,j)
+           lat = geolatp(i,j)
+           u0(i,j) = -u00*(dsin((lon+pi)/2.d0)**2)*(dsin(2.d0*lat))*(dcos(lat)**2)
+        ENDDO
+     ENDDO
+
+     DO j = 1, ny+1
+        DO i = 1, nx 
+           lon = xv(i)
+           lat = yv(j)
+           v0(i,j) = (u00/2.d0)*(dsin((lon+pi)))*(dcos(lat)**3)
+        ENDDO
+     ENDDO
+
+
+  
   ELSE
 
      PRINT *,'Initial condition ic = ',ic,' not coded.'
@@ -1004,17 +1068,22 @@ SUBROUTINE timing
   USE timeinfo
   USE constants
   USE version
+  USE grid
 
   IMPLICIT NONE
 
   ! Length of run
   !tstop = 1296000.0d0 !15 days
   IF(ic==7)THEN
-     tstop = 8.0d0*day2sec !518400.0d0 !6 days
+     tstop = 7.0d0*day2sec !518400.0d0 !6 days
+  ELSE IF(ic==5 .or. ic==105)THEN
+     tstop = 15.0d0*day2sec !518400.0d0 !15 days
   ELSEIF(ic==8)THEN
      tstop = 200.0d0*day2sec
+  ELSEIF(ic==9)THEN
+     tstop = 7.0d0*day2sec
   ELSE
-     tstop = 15.0d0*day2sec !15 days
+     tstop = 2.0d0*day2sec !15 days
   END IF
   ! tstop = 12000.0
 
@@ -1022,8 +1091,8 @@ SUBROUTINE timing
   !dt = 200.0d0
   !dt = 400.0d0
   !dt = 600.0d0
-  dt = 1200.0d0
-  !dt = 50.0d0 !225.0d0
+  !dt = 1000.0d0
+  dt = 1600.0d0/2.d0**(p-6)
   !dt = 20.0d0 !225.0d0
   !dt = 10800.0d0
   hdt = 0.5d0*dt
@@ -1047,11 +1116,17 @@ SUBROUTINE timing
   ! Number of steps between output dumps
   !Day by day
   IF(ic==7 .AND. idumpref)THEN
-     idump = nstop/8
+     idump = nstop/7
+  ELSE IF(ic==5 .AND. idumpref)THEN
+     idump = nstop/15
+  ELSE IF(ic==105 .AND. idumpref)THEN
+     idump = nstop/15
+  ELSE IF(ic==9 .AND. idumpref)THEN
+     idump = nstop/7
   ELSEIF(ic == 8)THEN
      idump = nstop/20
   ELSE
-     idump = nstop/15
+     idump = nstop/20
   END IF
   !idump = 10
 
@@ -1144,6 +1219,8 @@ SUBROUTINE integrate
   END IF
   !print*, "   Step   Nstep   Time(dys)  Ntime(dys)"
 
+
+  CALL writeref
 
   ! Loop over steps
   DO istep = 1, nstop
@@ -5444,6 +5521,7 @@ SUBROUTINE writeref
   USE timeinfo
   USE state
   USE version
+  USE constants
   USE FV3, only: fv_grid_type
   IMPLICIT NONE
 
@@ -5453,12 +5531,13 @@ SUBROUTINE writeref
   INTEGER :: nreftime      ! Number of times at which reference solution is required
   CHARACTER*128 :: ytime, dir
   CHARACTER*128 :: dirgrids, icname
-  CHARACTER*256 :: npx, face
+  CHARACTER*256 :: npx, face, nlon
   CHARACTER*256 :: filename, gn
   CHARACTER*256 :: dumpdir = 'dump/'
   REAL*8, ALLOCATABLE :: reftime(:)
   REAL*8, ALLOCATABLE :: href(:,:,:)
   REAL*8, ALLOCATABLE :: uref(:,:,:), vref(:,:,:)
+  REAL*8 :: u00, phi00, lat, lon, error, error1, alpha, uex
   LOGICAL:: ifile
   INTEGER :: n, ngrids, iunit
   INTEGER :: i, j, k, g
@@ -5477,32 +5556,37 @@ SUBROUTINE writeref
   icname=trim(adjustl(trim(icname)))
 
   IF (IC==7) THEN
-     nreftime = 8
-  ELSE
+     nreftime = 7
+  ELSE IF (IC==5) THEN
      nreftime = 15
+  ELSE IF (IC==9) THEN
+     nreftime = 7
+  ELSE
+     nreftime = 2
   ENDIF
-  allocate(reftime(1:nreftime))
+  allocate(reftime(0:nreftime))
   ! List of times at which reference solution is required
-  reftime(1) = 86400.0d0
+  reftime(0) = 0.0d0
 
-  DO i = 2, nreftime
+  error = 0.d0
+  DO i = 1, nreftime
      reftime(i) = reftime(i-1) + 86400.d0
   ENDDO
 
-  IF(istep==1)THEN
+  IF(istep==0)THEN
      OPEN(58,FILE=trim(dumpdir)//'TC'//trim(icname)//'_reftimes.dat', STATUS='replace')
      !WRITE(58, *) nreftime
-     DO ilist = 1, nreftime
+     DO ilist = 0, nreftime
         WRITE(58, *) int(reftime(ilist))
      END DO
      CLOSE(58)
+     nreftime = 0
   END IF
 
   n = 48
-  ngrids = 5
-
-  DO ilist = 1, nreftime
-     IF (istep == NINT(reftime(ilist)/dt)) THEN
+  ngrids = 1
+  DO ilist = 0, nreftime
+     IF (istep == NINT(reftime(ilist)/dt) .or. istep == 0) THEN
 
         ! Reference solution is required at this time
         WRITE(ytime,'(i8)') INT(reftime(ilist))
@@ -5513,9 +5597,9 @@ SUBROUTINE writeref
 
               WRITE(gn,'(i8)') INT(gridtypes(gtype))
               !------------------------------------------------------------------------------------------  
-              ! save grid
               IF(ilist==1)THEN
                  WRITE(npx,'(i8)') N
+                 ! save bgrid
                  DO k = 1, 6
                     ! lon
                     write(face,'(i8)') k
@@ -5534,6 +5618,27 @@ SUBROUTINE writeref
                     WRITE(iunit) gridstruct%bgrid(1:N+1,1:N+1,k)%lat
                     CLOSE(iunit)
                  ENDDO
+
+                 ! save agrid
+                 DO k = 1, 6
+                    ! lon
+                    write(face,'(i8)') k
+                    filename = trim(dumpdir)//'g'//trim(adjustl(gn))//'_N'//trim(adjustl(npx))&
+                    //"_face"//trim(adjustl(face))//'_lon_a.dat'
+                    CALL getunit(iunit)
+                    OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
+                    WRITE(iunit) gridstruct%agrid_sph(1:N,1:N,k)%lon
+                    CLOSE(iunit)
+
+                    ! lat
+                    filename = trim(dumpdir)//'g'//trim(adjustl(gn))//'_N'//trim(adjustl(npx))&
+                    //"_face"//trim(adjustl(face))//'_lat_a.dat'
+                    CALL getunit(iunit)
+                    OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
+                    WRITE(iunit) gridstruct%agrid_sph(1:N,1:N,k)%lat
+                    CLOSE(iunit)
+                 ENDDO
+ 
               ENDIF
               !------------------------------------------------------------------------------------------  
 
@@ -5553,13 +5658,14 @@ SUBROUTINE writeref
               ENDDO
 
               ! fluid depth
+              WRITE(nlon,'(i8)') nx
               WRITE(npx,'(i8)') N
-              filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.s_N'//&
+              filename = trim(dumpdir)//trim(adjustl(nlon))//'_tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'//&
               trim(adjustl(npx))//'_h_t'//trim(adjustl(ytime))//'.dat'
               PRINT *,'Creating reference solution file for h: ', filename
               DO k = 1, 6
                  write(face,'(i8)') k
-                 filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.s_N'&
+                 filename = trim(dumpdir)//trim(adjustl(nlon))//'_tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'&
                  //trim(adjustl(npx))//'_h_t'//trim(adjustl(ytime))//"_face"//trim(adjustl(face))//'.dat'
                  print*, filename
 
@@ -5571,12 +5677,12 @@ SUBROUTINE writeref
 
               ! zonal velocity u
               WRITE(npx,'(i8)') N
-              filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.s_N'&
+              filename = trim(dumpdir)//trim(adjustl(nlon))//'_tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'&
               //trim(adjustl(npx))//'_u_t'//trim(adjustl(ytime))//'.dat'
               PRINT *,'Creating reference solution file for u: ', filename
               DO k = 1, 6
                  write(face,'(i8)') k
-                 filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.s_N'&
+                 filename = trim(dumpdir)//trim(adjustl(nlon))//'_tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'&
                  //trim(adjustl(npx))//'_u_t'//trim(adjustl(ytime))&
                  //"_face"//trim(adjustl(face))//'.dat'
                  print*, filename
@@ -5589,82 +5695,12 @@ SUBROUTINE writeref
 
                ! meridional velocity v
               WRITE(npx,'(i8)') N
-              filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.s_N'&
+              filename = trim(dumpdir)//trim(adjustl(nlon))//'_tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'&
               //trim(adjustl(npx))//'_v_t'//trim(adjustl(ytime))//'.dat'
               PRINT *,'Creating reference solution file for v: ', filename
               DO k = 1, 6
                  write(face,'(i8)') k
-                 filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.s_N'&
-                 //trim(adjustl(npx))//'_v_t'//trim(adjustl(ytime))&
-                 //"_face"//trim(adjustl(face))//'.dat'
-                 print*, filename
-
-                 CALL getunit(iunit)
-                 OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
-                 WRITE(iunit) vref(:,:,k)
-                 CLOSE(iunit)
-              ENDDO
-
-
-
-
-
-
-
-
-              ! Now we consider agrid_cube
-              DO k = 1, nbfaces
-                DO i = 1, N
-                  CALL interpref (gridstruct%agrid_cube(i,:,k)%lon, gridstruct%agrid_cube(i,:,k)%lat, href(i,:,k), N)
-                  CALL interprefu(gridstruct%agrid_cube(i,:,k)%lon, gridstruct%agrid_cube(i,:,k)%lat, uref(i,:,k), N)
-                  CALL interprefv(gridstruct%agrid_cube(i,:,k)%lon, gridstruct%agrid_cube(i,:,k)%lat, vref(i,:,k), N)
-                ENDDO
-              ENDDO
-
-
-              ! fluid depth
-              WRITE(npx,'(i8)') N
-              filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.c_N'//&
-              trim(adjustl(npx))//'_h_t'//trim(adjustl(ytime))//'.dat'
-              PRINT *,'Creating reference solution file for h: ', filename
-              DO k = 1, 6
-                 write(face,'(i8)') k
-                 filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.c_N'&
-                 //trim(adjustl(npx))//'_h_t'//trim(adjustl(ytime))//"_face"//trim(adjustl(face))//'.dat'
-                 print*, filename
-
-                 CALL getunit(iunit)
-                 OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
-                 WRITE(iunit) href(:,:,k)
-                 CLOSE(iunit)
-              ENDDO
-
-              ! zonal velocity u
-              WRITE(npx,'(i8)') N
-              filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.c_N'&
-              //trim(adjustl(npx))//'_u_t'//trim(adjustl(ytime))//'.dat'
-              PRINT *,'Creating reference solution file for u: ', filename
-              DO k = 1, 6
-                 write(face,'(i8)') k
-                 filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.c_N'&
-                 //trim(adjustl(npx))//'_u_t'//trim(adjustl(ytime))&
-                 //"_face"//trim(adjustl(face))//'.dat'
-                 print*, filename
-
-                 CALL getunit(iunit)
-                 OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
-                 WRITE(iunit) uref(:,:,k)
-                 CLOSE(iunit)
-              ENDDO
-
-               ! meridional velocity v
-              WRITE(npx,'(i8)') N
-              filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.c_N'&
-              //trim(adjustl(npx))//'_v_t'//trim(adjustl(ytime))//'.dat'
-              PRINT *,'Creating reference solution file for v: ', filename
-              DO k = 1, 6
-                 write(face,'(i8)') k
-                 filename = trim(dumpdir)//'tc'//trim(icname)//'_g'//trim(adjustl(gn))//'.c_N'&
+                 filename = trim(dumpdir)//trim(adjustl(nlon))//'_tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'&
                  //trim(adjustl(npx))//'_v_t'//trim(adjustl(ytime))&
                  //"_face"//trim(adjustl(face))//'.dat'
                  print*, filename
@@ -5703,6 +5739,7 @@ SUBROUTINE interpref(xd,yd,href,nface)
   USE grid
   USE state
   USE util
+  USE constants
 
   IMPLICIT NONE
 
@@ -5720,7 +5757,7 @@ SUBROUTINE interpref(xd,yd,href,nface)
 
 
   ! Construct surface height
-  q = (phi + phis)/9.80616d0
+  q = (phi + phis)/gravity
 
   ! Regular gridded values are at phi points
   x = xp
