@@ -105,9 +105,9 @@ MODULE grid
   !INTEGER, PARAMETER :: p = 11, nx = 2**p, ny = 2**(p-1)
   !INTEGER, PARAMETER :: p = 10, nx = 2**p, ny = 2**(p-1)
   !INTEGER, PARAMETER :: p = 9, nx = 2**p, ny = 2**(p-1) !512x256
-  !INTEGER, PARAMETER :: p = 8, nx = 2**p, ny = 2**(p-1) !256x128
+  INTEGER, PARAMETER :: p = 8, nx = 2**p, ny = 2**(p-1) !256x128
   !INTEGER, PARAMETER :: p = 7, nx = 2**p, ny = 2**(p-1)
-  INTEGER, PARAMETER :: p = 6, nx = 2**p, ny = 2**(p-1)
+  !INTEGER, PARAMETER :: p = 6, nx = 2**p, ny = 2**(p-1)
   ! Or set ng = p - 1 with the following
   ! INTEGER, PARAMETER :: p = 3, nx = 3*2**p, ny = 3*2**(p-1)
   ! INTEGER, PARAMETER :: p = 3, nx = 5*2**p, ny = 5*2**(p-1)
@@ -688,23 +688,30 @@ SUBROUTINE initial
 
      cosr = COS(rotgrid)
      sinr = SIN(rotgrid)
+     !alpha = pi*0.d0
 
      DO j = 1, ny
         DO i = 1, nx
-           phi0(i,j) = phi00 - (rearth*omega*u00 + 0.5d0*u00*u00)*singeolatp(i,j)**2
            lon = geolonp(i,j)
            lat = geolatp(i,j)
-           u0(i,j) = u00*dcos(lon)
+           !phi0(i,j) = phi00 - (rearth*omega*u00 + 0.5d0*u00*u00)*&
+           !(-dcos(lon)*dcos(lat)*dsin(alpha) + dsin(lat)*dcos(alpha))**2
+           !u0(i,j) = u00*(dcos(lat)*dcos(alpha) + dsin(lat)*dcos(lon)*dsin(alpha))
+
+           phi0(i,j) = phi00 - (rearth*omega*u00 + 0.5d0*u00*u00)*(dsin(lat))**2
+           u0(i,j) = u00*dcos(lat)
         ENDDO
      ENDDO
 
      DO j = 1, ny+1
-        DO i = 1, nx 
-           lon = xv(i)
-           lat = yv(j)
-           v0(i,j) = 0.d0
+        DO i = 1, nx
+          lon = xv(i)
+          lat = yv(j)
+          !v0(i,j) = -u00*dsin(lon)**2*dsin(alpha)
+          v0(i,j) = 0.d0
         ENDDO
      ENDDO
+
 
      IF (ic == 5 ) THEN
         ! Include mountain
@@ -718,12 +725,8 @@ SUBROUTINE initial
         DO j = 1, ny
            DO i = 1, nx  
               ! Isolated mountain
-              call sph2cart(geolonp(i,j), geolatp(i,j), pxyz(1), pxyz(2), pxyz(3))
-              rr= dsqrt(dot_product( pxyz-p0xyz, pxyz-p0xyz))
-              phis(i,j) = phis0*dexp(-10.d0*rr)
-
-              !rr = SQRT(MIN(rr0*rr0,(geolonp(i,j)-longc)**2 + (geolatp(i,j)-latc)**2))
-              !phis(i,j) = phis0*(1.0 - rr/rr0)
+              rr = SQRT(MIN(rr0*rr0,(geolonp(i,j)-longc)**2 + (geolatp(i,j)-latc)**2))
+              phis(i,j) = phis0*(1.0 - rr/rr0)
            ENDDO
         ENDDO
         ! Correct phi to allow for orography
@@ -731,50 +734,26 @@ SUBROUTINE initial
      ENDIF
 
      IF (ic == 105 ) THEN
-       ! Gaussian hill
-       longc=pi
-       latc =0.d0
-       call sph2cart(longc, latc, p0xyz(1), p0xyz(2), p0xyz(3))
-       DO j = 1, ny
-          DO i = 1, nx
-             call sph2cart(geolonp(i,j), geolatp(i,j), pxyz(1), pxyz(2), pxyz(3))
-             rr= dsqrt(dot_product( pxyz-p0xyz, pxyz-p0xyz))
-             !phi0(i,j) =  phi0(i,j) + gravity*hpert*dexp(-10.d0*rr)
-          ENDDO
-       ENDDO
-
-
-     !    phis0 = 20.0d0*9.80616d0
-     !    rr0 = pi/9.0d0
-     !    latc = pi/6.0d0
-     !    longc = 3.0d0*pi/2.0d0 !0.5d0*pi
-     !    DO j = 1, ny
-     !      DO i = 1, nx
-     !
-     !            !thin layer
-     !        	phi0(i,j) = 100.0d0*gravity
-     !
-     !        	!Mountain
-     !	        !Convert lonc, latc to cartesian coords
-     !			call sph2cart(longc, latc, p0xyz(1), p0xyz(2), p0xyz(3))
-     !	        !Convert geolonp, geolatp to cartesian coords
-     !			call sph2cart(geolonp(i,j), geolatp(i,j), pxyz(1), pxyz(2), pxyz(3))
-     !	        !Set mountain
-     !	        rr= dsqrt(dot_product( pxyz-p0xyz, pxyz-p0xyz))
-     !	        rr1=2*(1-cos(rr0))
-     !
-     !			phis(i,j) =  phi00 - 0.5*(rearth*twoomega*u00 + u00*u00)*singeolatp(i,j)**2
-     !
-     !			phis(i,j) =phis(i,j) + phis0*exp(-0.4*rr**2/rr1**2)
-     !			phi0(i,j) =phi0(i,j) - phis0*exp(-0.4*rr**2/rr1**2)
-     !			!print*, geolonp(i,j), geolatp(i,j), phis(i,j), phi0(i,j)
-     !      ENDDO
-     !    ENDDO
-     !    ! Do not correct phi to allow for orography!
-     !    !phi0 = phi0 - phis
-     !
-     !PXT
+        ! Include mountain
+        phis0 = 2000.0d0*gravity
+        rr0 = pi/9.0d0
+        latc = pi/6.0d0
+        longc = 3.0d0*pi/2.0d0 + pi/4.d0!0.5d0*pi
+        call sph2cart(longc, latc, p0xyz(1), p0xyz(2), p0xyz(3))
+        !print*, phis0, longc, latc, rr0, phi00, u00
+        !stop
+        DO j = 1, ny
+           DO i = 1, nx  
+              ! Isolated mountain
+              call sph2cart(geolonp(i,j), geolatp(i,j), pxyz(1), pxyz(2), pxyz(3))
+              rr= dsqrt(dot_product( pxyz-p0xyz, pxyz-p0xyz))
+              phis(i,j) = phis0*dexp(-10.d0*rr*rr)
+           ENDDO
+        ENDDO
+        ! Correct phi to allow for orography
+        phi0 = phi0 - phis
      ENDIF
+
   ELSEIF (ic == 8) THEN
 
      u00 = 2.0d0*pi*rearth/(12.0d0*86400.0d0)
@@ -1125,6 +1104,8 @@ SUBROUTINE timing
      idump = nstop/7
   ELSEIF(ic == 8)THEN
      idump = nstop/20
+  ELSEIF(ic == 2)THEN
+     idump = nstop/2
   ELSE
      idump = nstop/20
   END IF
@@ -5537,7 +5518,7 @@ SUBROUTINE writeref
   REAL*8, ALLOCATABLE :: reftime(:)
   REAL*8, ALLOCATABLE :: href(:,:,:)
   REAL*8, ALLOCATABLE :: uref(:,:,:), vref(:,:,:)
-  REAL*8 :: u00, phi00, lat, lon, error, error1, alpha, uex
+  REAL*8 :: u00, phi00, lat, lon, error_h, error_u, error_v, error1, alpha, u_ex, v_ex, phi_ex, h_ex
   LOGICAL:: ifile
   INTEGER :: n, ngrids, iunit
   INTEGER :: i, j, k, g
@@ -5557,7 +5538,7 @@ SUBROUTINE writeref
 
   IF (IC==7) THEN
      nreftime = 7
-  ELSE IF (IC==5) THEN
+  ELSE IF (IC==5 .or. IC==105) THEN
      nreftime = 15
   ELSE IF (IC==9) THEN
      nreftime = 7
@@ -5568,7 +5549,6 @@ SUBROUTINE writeref
   ! List of times at which reference solution is required
   reftime(0) = 0.0d0
 
-  error = 0.d0
   DO i = 1, nreftime
      reftime(i) = reftime(i-1) + 86400.d0
   ENDDO
@@ -5584,7 +5564,7 @@ SUBROUTINE writeref
   END IF
 
   n = 48
-  ngrids = 1
+  ngrids = 4
   DO ilist = 0, nreftime
      IF (istep == NINT(reftime(ilist)/dt) .or. istep == 0) THEN
 
@@ -5657,17 +5637,55 @@ SUBROUTINE writeref
                 ENDDO
               ENDDO
 
+              !print*, istep
+              error_h = 0.d0
+              error_u = 0.d0
+              error_v = 0.d0
+
+              u00 = 2.0d0*pi*rearth/(12.0d0*86400.0d0)
+              phi00 = 2.94d4
+              !alpha = pi*0.d0
+              DO k = 1, nbfaces
+                DO i = 1, N
+                  DO j = 1, N
+                     lon = gridstruct%agrid_sph(i,j,k)%lon
+                     lat = gridstruct%agrid_sph(i,j,k)%lat
+                     !phi_ex = phi00 - (rearth*omega*u00 + 0.5d0*u00*u00)*&
+                     !(-dcos(lon)*dcos(lat)*dsin(alpha) + dsin(lat)*dcos(alpha))**2
+                     phi_ex = phi00 - (rearth*omega*u00 + 0.5d0*u00*u00)*(dsin(lat))**2
+ 
+                     h_ex = phi_ex/gravity
+
+                     !u_ex = u00*(dcos(lat)*dcos(alpha) + dsin(lat)*dcos(lon)*dsin(alpha))
+                     u_ex = u00*dcos(lat)
+
+                     !v_ex = -u00*dsin(lat)**2*dsin(alpha)
+                     v_ex = 0.d0
+
+                     !print*, u_ex, uref(i,j,k)
+                     !print*, h_ex, href(i,j,k), abs(h_ex-href(i,j,k))
+                     error_h = max(error_h, abs(h_ex-href(i,j,k)))
+                     error_u = max(error_u, abs(u_ex-uref(i,j,k)))
+                     error_v = max(error_v, abs(v_ex-vref(i,j,k)))
+                  ENDDO
+                ENDDO
+              ENDDO
+              !print*, g, N, 'h', error_h
+              !print*, g, N, 'u', error_u
+              !print*, g, N, 'v', error_v
+              !print*
+
               ! fluid depth
               WRITE(nlon,'(i8)') nx
               WRITE(npx,'(i8)') N
               filename = trim(dumpdir)//trim(adjustl(nlon))//'_tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'//&
               trim(adjustl(npx))//'_h_t'//trim(adjustl(ytime))//'.dat'
-              PRINT *,'Creating reference solution file for h: ', filename
+              !PRINT *,'Creating reference solution file for h: ', filename
               DO k = 1, 6
                  write(face,'(i8)') k
                  filename = trim(dumpdir)//trim(adjustl(nlon))//'_tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'&
                  //trim(adjustl(npx))//'_h_t'//trim(adjustl(ytime))//"_face"//trim(adjustl(face))//'.dat'
-                 print*, filename
+                 !print*, filename
 
                  CALL getunit(iunit)
                  OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
@@ -5679,13 +5697,13 @@ SUBROUTINE writeref
               WRITE(npx,'(i8)') N
               filename = trim(dumpdir)//trim(adjustl(nlon))//'_tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'&
               //trim(adjustl(npx))//'_u_t'//trim(adjustl(ytime))//'.dat'
-              PRINT *,'Creating reference solution file for u: ', filename
+              !PRINT *,'Creating reference solution file for u: ', filename
               DO k = 1, 6
                  write(face,'(i8)') k
                  filename = trim(dumpdir)//trim(adjustl(nlon))//'_tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'&
                  //trim(adjustl(npx))//'_u_t'//trim(adjustl(ytime))&
                  //"_face"//trim(adjustl(face))//'.dat'
-                 print*, filename
+                 !print*, filename
 
                  CALL getunit(iunit)
                  OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
@@ -5697,13 +5715,13 @@ SUBROUTINE writeref
               WRITE(npx,'(i8)') N
               filename = trim(dumpdir)//trim(adjustl(nlon))//'_tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'&
               //trim(adjustl(npx))//'_v_t'//trim(adjustl(ytime))//'.dat'
-              PRINT *,'Creating reference solution file for v: ', filename
+              !PRINT *,'Creating reference solution file for v: ', filename
               DO k = 1, 6
                  write(face,'(i8)') k
                  filename = trim(dumpdir)//trim(adjustl(nlon))//'_tc'//trim(icname)//'_g'//trim(adjustl(gn))//'_N'&
                  //trim(adjustl(npx))//'_v_t'//trim(adjustl(ytime))&
                  //"_face"//trim(adjustl(face))//'.dat'
-                 print*, filename
+                 !print*, filename
 
                  CALL getunit(iunit)
                  OPEN(iunit, FILE=filename, STATUS='REPLACE', ACCESS='STREAM', FORM='UNFORMATTED')
@@ -5722,6 +5740,7 @@ SUBROUTINE writeref
      ENDIF
 
   ENDDO
+  !STOP
 
 
   ! ---------------------------------------------------------
